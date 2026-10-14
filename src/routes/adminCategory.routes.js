@@ -1,0 +1,37 @@
+// ADMIN category management, mounted at /api/v1/admin/categories. Admin JWT required.
+//
+//   GET    /admin/categories/stats               Main Categories / Sub-Categories cards
+//   GET    /admin/categories                     tree for a tab (?type=product|service&search=&isActive=)
+//   GET    /admin/categories/import/template     download the CSV template
+//   POST   /admin/categories/import              bulk add from CSV (?dryRun=true to preview)
+//   GET    /admin/categories/:id                 one category (+ sub-categories or + main category)
+//   POST   /admin/categories                     add a main category or a sub-category (send parentId)
+//   PUT    /admin/categories/:id                 edit name / appliesTo / description / sortOrder
+//   POST   /admin/categories/:id/icon            upload the icon image (form-data, field "file")
+//   PATCH  /admin/categories/:id/status          enable / disable (a main category with its sub-categories)
+//   DELETE /admin/categories/:id                 SOFT delete (main: only when it has no sub-categories)
+const express = require('express');
+const controller = require('../controllers/adminCategory.controller');
+const rules = require('../validators/adminCategory.validator');
+const validate = require('../middlewares/validate');
+const uploadCsv = require('../middlewares/uploadCsv');
+const uploadCategoryIcon = require('../middlewares/uploadCategoryIcon');
+const { protectAdmin } = require('../middlewares/adminAuth');
+
+const router = express.Router();
+router.use(protectAdmin);
+
+// Fixed paths first, so "stats" / "import" aren't read as an :id
+router.get('/stats', controller.stats);
+router.get('/import/template', controller.importTemplate);
+router.post('/import', rules.importCsv, validate, uploadCsv, controller.importCsv);
+router.get('/', rules.list, validate, controller.list);
+router.post('/', rules.create, validate, controller.create);
+
+router.get('/:id', rules.byId, validate, controller.getById);
+router.put('/:id', rules.update, validate, controller.update);
+router.post('/:id/icon', rules.byId, validate, uploadCategoryIcon, controller.setIcon);
+router.patch('/:id/status', rules.setStatus, validate, controller.setStatus);
+router.delete('/:id', rules.byId, validate, controller.remove);
+
+module.exports = router;

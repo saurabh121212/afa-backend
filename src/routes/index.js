@@ -14,6 +14,7 @@ router.get('/health', (req, res) => {
 
 // ---- Public dropdown data ----
 router.use('/locations', require('./location.routes'));
+router.use('/categories', require('./category.routes')); // product / service categories
 
 // ---- SHARED by all user types ----
 router.use('/auth', require('./auth.routes')); // login, forgot/reset password, me
@@ -32,5 +33,6 @@ router.use('/admin/auth', require('./adminAuth.routes'));
 router.use('/admin/locations', require('./adminLocation.routes'));
 router.use('/admin/users', require('./adminUser.routes'));
 router.use('/admin/kyc-queue', require('./kycQueue.routes'));
+router.use('/admin/categories', require('./adminCategory.routes'));
 
 module.exports = router;
