@@ -28,9 +28,8 @@ const {
 const { iconUrl, ORDER } = require('./category.service');
 
 // Tables that point to a category (used by the "in use" check before delete).
-// Add the listings table here when the marketplace is built, e.g.
-//   { table: 'listings', columns: ['category_id', 'sub_category_id'], label: 'listings' }
-const CATEGORY_USAGE = [];
+// Listings count even when the listing itself was deleted (soft delete keeps the row).
+const CATEGORY_USAGE = [{ table: 'listings', columns: ['category_id', 'sub_category_id'], label: 'listings' }];
 
 // ---------- helpers ----------
 const cleanName = (name) => String(name || '').trim().replace(/\s+/g, ' ');
@@ -94,10 +93,20 @@ const duplicateError = (parentId, existingName) => {
   return new ApiError(409, msg, { code: 'DUPLICATE_VALUE', errors: [{ field: 'name', message: msg }] });
 };
 
-// Listings per category. Returns 0 until the marketplace listings table exists.
-// eslint-disable-next-line no-unused-vars
+// Listings per category (not deleted, any status) -> Map(categoryId -> count)
 async function listingCounts(ids) {
-  return new Map();
+  const counts = new Map();
+  if (!ids.length) return counts;
+  const rows = await sequelize.query(
+    `SELECT category_id AS id, COUNT(*) AS total FROM listings
+      WHERE deleted_at IS NULL AND category_id IN (:ids) GROUP BY category_id
+     UNION ALL
+     SELECT sub_category_id AS id, COUNT(*) AS total FROM listings
+      WHERE deleted_at IS NULL AND sub_category_id IN (:ids) GROUP BY sub_category_id`,
+    { replacements: { ids }, type: sequelize.QueryTypes.SELECT }
+  );
+  rows.forEach((r) => counts.set(Number(r.id), (counts.get(Number(r.id)) || 0) + Number(r.total)));
+  return counts;
 }
 
 // Admin shape. "appliesTo" of a sub-category = its main category's value.

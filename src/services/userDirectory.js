@@ -134,6 +134,34 @@ async function findOne(userId) {
   return row || null;
 }
 
+// Directory rows of many users at once (e.g. the sellers on one page of listings)
+//   -> Map(userId -> { user_id, user_type, status, display_name, sub_name, region_id, region_name })
+async function findMany(userIds) {
+  const ids = [...new Set(userIds)].filter(Boolean);
+  if (!ids.length) return new Map();
+  const rows = await sequelize.query(
+    `SELECT u.id AS user_id, u.user_type, u.status, d.display_name, d.sub_name, d.region_id, r.name AS region_name
+       FROM users u
+       LEFT JOIN (${DIRECTORY_SQL}) d ON d.user_id = u.id
+       LEFT JOIN locations r ON r.id = d.region_id
+      WHERE u.id IN (:ids)`,
+    { replacements: { ids }, type: sequelize.QueryTypes.SELECT }
+  );
+  return new Map(rows.map((r) => [r.user_id, r]));
+}
+
+// User ids whose name / business name / email matches a search text (admin listing search)
+async function findUserIdsByName(search, limit = 500) {
+  const rows = await sequelize.query(
+    `SELECT u.id FROM users u
+       LEFT JOIN (${DIRECTORY_SQL}) d ON d.user_id = u.id
+      WHERE d.display_name LIKE :search OR d.sub_name LIKE :search OR u.email LIKE :search
+      LIMIT :limit`,
+    { replacements: { search: `%${search}%`, limit }, type: sequelize.QueryTypes.SELECT }
+  );
+  return rows.map((r) => r.id);
+}
+
 // ---------- KYC documents of all users (admin "documents to review" list) ----------
 //   filters -> { status, userType, documentType, search }
 const DOC_SORTS = {
@@ -185,4 +213,4 @@ async function findDocuments(filters = {}, { sort = 'oldest', limit, offset = 0 
   return { rows, total: Number(total) };
 }
 
-module.exports = { findUsers, countUsers, findOne, findDocuments, SORTS };
+module.exports = { findUsers, countUsers, findOne, findMany, findUserIdsByName, findDocuments, SORTS };

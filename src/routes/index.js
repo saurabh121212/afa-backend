@@ -15,11 +15,13 @@ router.get('/health', (req, res) => {
 // ---- Public dropdown data ----
 router.use('/locations', require('./location.routes'));
 router.use('/categories', require('./category.routes')); // product / service categories
+router.use('/listings', require('./listing.routes')); // public marketplace (approved listings only)
 
 // ---- SHARED by all user types ----
 router.use('/auth', require('./auth.routes')); // login, forgot/reset password, me
 router.use('/register', require('./registration.routes')); // resume, progress, Step 4 (OTP + submit)
-router.use('/me', require('./me.routes')); // logged-in user's own account (KYC documents)
+router.use('/me/listings', require('./myListing.routes')); // seller's own listings (before /me)
+router.use('/me', require('./me.routes')); // logged-in user's own account (profile, payments, KYC documents)
 
 // ---- ONE file per user type ----
 router.use('/farmers', require('./farmer.routes')); // farmer registration Steps 1-3
@@ -34,5 +36,6 @@ router.use('/admin/locations', require('./adminLocation.routes'));
 router.use('/admin/users', require('./adminUser.routes'));
 router.use('/admin/kyc-queue', require('./kycQueue.routes'));
 router.use('/admin/categories', require('./adminCategory.routes'));
+router.use('/admin/listings', require('./adminListing.routes'));
 
 module.exports = router;

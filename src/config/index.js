@@ -47,6 +47,9 @@ const config = {
     maxFileSizeMB: toInt(process.env.MAX_FILE_SIZE_MB, 5),
   },
 
+  // 64 hex characters (32 bytes). Encrypts sensitive data such as bank account numbers.
+  encryptionKey: process.env.DATA_ENCRYPTION_KEY || '',
+
   corsOrigins: (process.env.CORS_ORIGINS || '')
     .split(',')
     .map((o) => o.trim())

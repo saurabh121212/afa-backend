@@ -150,8 +150,56 @@ async function sendAccountReactivatedEmail({ to, name, userType }) {
   return send({ to, subject, html, text: 'Your AFA account has been reactivated. You can log in again.' });
 }
 
+// Security notice after the user changed their password from the profile screen
+async function sendPasswordChangedEmail({ to, name, userType }) {
+  const subject = `Your AFA password was changed${typeLabel(userType)}`;
+  const html = layout(
+    'Password changed',
+    `<p>Hello ${escapeHtml(name || '')},</p>
+     ${accountLine(userType)}
+     <p>The password of your AFA account was just changed. You have been logged out on your other devices.</p>
+     <p><strong>Wasn't you?</strong> Reset your password right away with "Forgot password" on the login screen
+     and contact AFA support.</p>`
+  );
+  return send({
+    to,
+    subject,
+    html,
+    text: "Your AFA password was just changed. If this wasn't you, reset your password with \"Forgot password\" and contact AFA support.",
+  });
+}
+
+// Seller: the admin reviewed one of their marketplace listings
+const LISTING_EMAIL = {
+  approve: { subject: 'Your listing is now live', title: 'Listing approved', text: 'is approved and now visible on the AFA Marketplace.' },
+  reject: { subject: 'Your listing was not approved', title: 'Listing not approved', text: 'was not approved. Please update it and publish it again.' },
+  flag: { subject: 'Your listing was flagged', title: 'Listing flagged', text: 'was flagged by the AFA admin and is hidden. Please update it and publish it again.' },
+  disable: { subject: 'Your listing was disabled', title: 'Listing disabled', text: 'was disabled by the AFA admin and is no longer visible.' },
+  enable: { subject: 'Your listing is live again', title: 'Listing enabled', text: 'was enabled again and is visible on the AFA Marketplace.' },
+};
+
+async function sendListingStatusEmail({ to, name, userType, listingName, action, reason }) {
+  const t = LISTING_EMAIL[action];
+  if (!t) return null;
+  const html = layout(
+    t.title,
+    `<p>Hello ${escapeHtml(name || '')},</p>
+     ${accountLine(userType)}
+     <p>Your listing <strong>${escapeHtml(listingName)}</strong> ${t.text}</p>
+     ${reasonBlock('Reason', reason)}`
+  );
+  return send({
+    to,
+    subject: `${t.subject}${typeLabel(userType)}`,
+    html,
+    text: `Your listing "${listingName}" ${t.text}${reason ? ` Reason: ${reason}` : ''}`,
+  });
+}
+
 module.exports = {
   verifyEmailConnection,
+  sendPasswordChangedEmail,
+  sendListingStatusEmail,
   sendOtpEmail,
   sendRegistrationSubmittedEmail,
   sendAccountApprovedEmail,

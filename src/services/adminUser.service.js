@@ -18,6 +18,7 @@ const directory = require('./userDirectory');
 const documentService = require('./document.service');
 const emailService = require('./email.service');
 const { loadUserWithProfile } = require('./registration.service');
+const paymentMethodService = require('./paymentMethod.service');
 
 const S = USER_STATUS;
 
@@ -170,11 +171,12 @@ async function notesOf(userId) {
 // GET /admin/users/:id
 async function getDetails(id) {
   await findUserOr404(id);
-  const [user, dir, docs, notes] = await Promise.all([
+  const [user, dir, docs, notes, paymentMethods] = await Promise.all([
     loadUserWithProfile(id),
     directory.findOne(id),
     UserDocument.findAll({ where: { userId: id }, order: [['documentType', 'ASC']] }),
     notesOf(id),
+    paymentMethodService.listFor(id), // read-only for the admin (account numbers masked)
   ]);
   return {
     displayId: displayId(user.userType, user.id),
@@ -187,6 +189,7 @@ async function getDetails(id) {
     user,
     documents: documentSummary(user.userType, dir ? dir.subtype : null, docs),
     notes,
+    paymentMethods: paymentMethodService.isAllowed(user.userType) ? paymentMethods : null,
     trustScore: null,
   };
 }
