@@ -6,16 +6,20 @@
 //                             ?search=&kind=product|service&categoryId=&subCategoryId=&regionId=
 //                             &sellerType=farmer|trader|logistics&sellerId=&minPrice=&maxPrice=
 //                             &availability=&sort=newest|price_asc|price_desc|name_asc&page=&limit=
-//   GET /listings/:id         listing details + seller
+//   GET /listings/:id         listing details + "About the Seller"
+//   GET /listings/:id/related "You May Also Like" (?limit=, default 8)
 const express = require('express');
 const controller = require('../controllers/listing.controller');
 const rules = require('../validators/listing.validator');
 const validate = require('../middlewares/validate');
+const wishlistController = require('../controllers/wishlist.controller');
+const wishlistRules = require('../validators/wishlist.validator');
 
 const router = express.Router();
 
 router.get('/options', controller.listingOptions);
 router.get('/', rules.publicList, validate, controller.publicList);
+router.get('/:id/related', wishlistRules.related, validate, wishlistController.related);
 router.get('/:id', rules.byId, validate, controller.publicGet);
 
 module.exports = router;

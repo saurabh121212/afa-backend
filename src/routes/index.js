@@ -16,6 +16,7 @@ router.get('/health', (req, res) => {
 router.use('/locations', require('./location.routes'));
 router.use('/categories', require('./category.routes')); // product / service categories
 router.use('/listings', require('./listing.routes')); // public marketplace (approved listings only)
+router.use('/sellers', require('./seller.routes')); // public seller pages ("About the Seller", "Visit Store")
 
 // ---- SHARED by all user types ----
 router.use('/auth', require('./auth.routes')); // login, forgot/reset password, me

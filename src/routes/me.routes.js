@@ -12,6 +12,13 @@
 //   PATCH  /me/payment-methods/:id/primary            make it the primary one
 //   DELETE /me/payment-methods/:id                    remove (soft delete)
 //
+// Wishlist (every user type; only live listings, not your own):
+//   GET    /me/wishlist                               saved listings (newest first, ?page=&limit=)
+//   GET    /me/wishlist/ids                           only the listing ids (to fill the heart icons)
+//   POST   /me/wishlist                               { listingId } add (adding twice is fine)
+//   DELETE /me/wishlist/:listingId                    remove
+//   DELETE /me/wishlist                               remove everything
+//
 // KYC documents after registration (documents are optional at registration,
 // so users can upload or replace them any time from their account):
 //   GET    /me/documents                              document cards + status (pending / approved / rejected)
@@ -27,6 +34,8 @@ const paymentController = require('../controllers/paymentMethod.controller');
 const documentRules = require('../validators/document.validator');
 const profileRules = require('../validators/profile.validator');
 const paymentRules = require('../validators/paymentMethod.validator');
+const wishlistController = require('../controllers/wishlist.controller');
+const wishlistRules = require('../validators/wishlist.validator');
 const validate = require('../middlewares/validate');
 const uploadKycDocument = require('../middlewares/uploadKycDocument');
 const { checkDocumentAllowed } = require('../middlewares/documentAccess');
@@ -47,6 +56,13 @@ router.post('/payment-methods', paymentRules.create, validate, paymentController
 router.put('/payment-methods/:id', paymentRules.update, validate, paymentController.update);
 router.patch('/payment-methods/:id/primary', paymentRules.byId, validate, paymentController.setPrimary);
 router.delete('/payment-methods/:id', paymentRules.byId, validate, paymentController.remove);
+
+// ---- Wishlist ----
+router.get('/wishlist', wishlistRules.list, validate, wishlistController.list);
+router.get('/wishlist/ids', wishlistController.ids);
+router.post('/wishlist', wishlistRules.add, validate, wishlistController.add);
+router.delete('/wishlist/:listingId', wishlistRules.remove, validate, wishlistController.remove);
+router.delete('/wishlist', wishlistController.clear);
 
 // ---- KYC documents ----
 router.get('/documents', documentController.list);

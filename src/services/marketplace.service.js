@@ -12,6 +12,7 @@ const { USER_STATUS, USER_TYPE_LABELS } = require('../utils/constants');
 const { LISTING_STATUS } = require('../config/listingOptions');
 const directory = require('./userDirectory');
 const { baseShape } = require('./listing.service');
+const { sellerCard } = require('./seller.service');
 
 const SORTS = {
   newest: [['publishedAt', 'DESC'], ['id', 'DESC']],
@@ -117,15 +118,49 @@ async function getById(id) {
   });
   if (!listing) throw new ApiError(404, 'Listing not found', { code: 'LISTING_NOT_FOUND' });
 
-  const sellers = await directory.findMany([listing.userId]);
-  const coverage = listing.coverageRegionIds && listing.coverageRegionIds.length
-    ? await Location.findAll({ where: { id: listing.coverageRegionIds }, attributes: ['id', 'name'], order: [['name', 'ASC']] })
-    : [];
+  const [seller, coverage] = await Promise.all([
+    sellerCard(listing.userId), // "About the Seller" card
+    listing.coverageRegionIds && listing.coverageRegionIds.length
+      ? Location.findAll({ where: { id: listing.coverageRegionIds }, attributes: ['id', 'name'], order: [['name', 'ASC']] })
+      : [],
+  ]);
   return {
     ...baseShape(listing),
     ...(listing.kind === 'service' ? { coverageRegions: coverage.map((c) => ({ id: c.id, name: c.name })) } : {}),
-    seller: sellerShape(listing.userId, sellers.get(listing.userId)),
+    seller,
   };
 }
 
-module.exports = { list, getById, sellerShape };
+// ---------- GET /listings/:id/related ("You May Also Like") ----------
+// Live listings of the same kind, best matches first:
+//   same sub-category -> same category -> same region -> newest.
+// Never the listing itself, and never other listings of the same seller (that's "Visit Store").
+async function related(id, { limit = 8 } = {}) {
+  const listing = await Listing.findOne({
+    where: { id, status: LISTING_STATUS.ACTIVE },
+    attributes: ['id', 'userId', 'kind', 'categoryId', 'subCategoryId', 'regionId'],
+  });
+  if (!listing) throw new ApiError(404, 'Listing not found', { code: 'LISTING_NOT_FOUND' });
+
+  const score = (column, value) =>
+    value ? sequelize.literal(`CASE WHEN \`Listing\`.\`${column}\` = ${Number(value)} THEN 1 ELSE 0 END`) : null;
+  const order = [
+    score('sub_category_id', listing.subCategoryId),
+    score('category_id', listing.categoryId),
+    score('region_id', listing.regionId),
+  ]
+    .filter(Boolean)
+    .map((expr) => [expr, 'DESC'])
+    .concat([['publishedAt', 'DESC'], ['id', 'DESC']]);
+
+  const rows = await Listing.findAll({
+    where: { status: LISTING_STATUS.ACTIVE, kind: listing.kind, id: { [Op.ne]: listing.id }, userId: { [Op.ne]: listing.userId } },
+    include: visibleIncludes(),
+    order,
+    limit,
+  });
+  const sellers = await directory.findMany(rows.map((r) => r.userId));
+  return rows.map((r) => ({ ...baseShape(r), seller: sellerShape(r.userId, sellers.get(r.userId)) }));
+}
+
+module.exports = { list, getById, related, sellerShape, visibleIncludes };
