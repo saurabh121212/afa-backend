@@ -12,6 +12,14 @@
 //   PATCH  /me/payment-methods/:id/primary            make it the primary one
 //   DELETE /me/payment-methods/:id                    remove (soft delete)
 //
+// Saved delivery addresses (every user type; Figma "Saved Addresses"):
+//   GET    /me/addresses                              list (Default first) + "use my registered address" suggestion
+//   GET    /me/addresses/:id                          one address
+//   POST   /me/addresses                              add (first one = Default, up to 10)
+//   PUT    /me/addresses/:id                          edit
+//   PATCH  /me/addresses/:id/default                  "Set as Default"
+//   DELETE /me/addresses/:id                          delete (soft)
+//
 // Wishlist (every user type; only live listings, not your own):
 //   GET    /me/wishlist                               saved listings (newest first, ?page=&limit=)
 //   GET    /me/wishlist/ids                           only the listing ids (to fill the heart icons)
@@ -35,6 +43,8 @@ const documentRules = require('../validators/document.validator');
 const profileRules = require('../validators/profile.validator');
 const paymentRules = require('../validators/paymentMethod.validator');
 const wishlistController = require('../controllers/wishlist.controller');
+const addressController = require('../controllers/address.controller');
+const addressRules = require('../validators/address.validator');
 const wishlistRules = require('../validators/wishlist.validator');
 const validate = require('../middlewares/validate');
 const uploadKycDocument = require('../middlewares/uploadKycDocument');
@@ -56,6 +66,14 @@ router.post('/payment-methods', paymentRules.create, validate, paymentController
 router.put('/payment-methods/:id', paymentRules.update, validate, paymentController.update);
 router.patch('/payment-methods/:id/primary', paymentRules.byId, validate, paymentController.setPrimary);
 router.delete('/payment-methods/:id', paymentRules.byId, validate, paymentController.remove);
+
+// ---- Saved delivery addresses ----
+router.get('/addresses', addressController.list);
+router.post('/addresses', addressRules.create, validate, addressController.create);
+router.get('/addresses/:id', addressRules.byId, validate, addressController.getOne);
+router.put('/addresses/:id', addressRules.update, validate, addressController.update);
+router.patch('/addresses/:id/default', addressRules.byId, validate, addressController.setDefault);
+router.delete('/addresses/:id', addressRules.byId, validate, addressController.remove);
 
 // ---- Wishlist ----
 router.get('/wishlist', wishlistRules.list, validate, wishlistController.list);
