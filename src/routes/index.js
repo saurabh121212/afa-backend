@@ -22,6 +22,7 @@ router.use('/sellers', require('./seller.routes')); // public seller pages ("Abo
 router.use('/auth', require('./auth.routes')); // login, forgot/reset password, me
 router.use('/register', require('./registration.routes')); // resume, progress, Step 4 (OTP + submit)
 router.use('/me/listings', require('./myListing.routes')); // seller's own listings (before /me)
+router.use('/me/conversations', require('./chat/conversation.routes')); // chat / Messages (before /me)
 router.use('/me', require('./me.routes')); // logged-in user's own account (profile, payments, KYC documents)
 
 // ---- ONE file per user type ----

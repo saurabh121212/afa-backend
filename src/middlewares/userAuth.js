@@ -5,6 +5,7 @@
 //                             users waiting for approval if their type allows it (e.g. buyers)
 //   requireApprovedAccount -> actions that need admin approval (e.g. placing an order)
 //   requireUserType        -> limit a route to certain user types (e.g. 'farmer')
+//   decodeToken + authenticateUser -> the protectUser checks without a request (realtime connections)
 const { User } = require('../models');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
@@ -18,6 +19,10 @@ function readToken(req) {
   if (scheme !== 'Bearer' || !token) {
     throw new ApiError(401, 'Authentication token missing', { code: 'TOKEN_MISSING' });
   }
+  return decodeToken(token);
+}
+
+function decodeToken(token) {
   try {
     return verifyToken(token);
   } catch (err) {
@@ -47,7 +52,13 @@ const protectRegistration = asyncHandler(async (req, res, next) => {
 });
 
 const protectUser = asyncHandler(async (req, res, next) => {
-  const payload = readToken(req);
+  req.user = await authenticateUser(readToken(req));
+  next();
+});
+
+// The logged-in user behind a decoded login token, with the same checks as protectUser.
+// Also used for realtime (Socket.IO) connections: authenticateUser(decodeToken(token)).
+async function authenticateUser(payload) {
   if (payload.type !== 'user') {
     throw new ApiError(403, 'Please log in to continue', { code: 'WRONG_TOKEN_TYPE' });
   }
@@ -69,9 +80,8 @@ const protectUser = asyncHandler(async (req, res, next) => {
     throw new ApiError(403, 'Your account is not active', { code: 'ACCOUNT_NOT_ACTIVE' });
   }
 
-  req.user = user;
-  next();
-});
+  return user;
+}
 
 // For actions that need admin approval (e.g. placing an order). Use AFTER protectUser.
 //   router.post('/orders', protectUser, requireApprovedAccount, ...)
@@ -99,4 +109,11 @@ const requireUserType = (...types) => (req, res, next) => {
   next();
 };
 
-module.exports = { protectRegistration, protectUser, requireApprovedAccount, requireUserType };
+module.exports = {
+  protectRegistration,
+  protectUser,
+  requireApprovedAccount,
+  requireUserType,
+  decodeToken,
+  authenticateUser,
+};

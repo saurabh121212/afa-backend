@@ -5,3 +5,5 @@ uploads/*
 logs/
 *.log
 .DS_Store
+# Database SSL certificates (e.g. Aiven ca.pem): kept on each machine, never committed
+certs/
