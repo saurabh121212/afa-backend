@@ -17,12 +17,12 @@ router.use('/locations', require('./location.routes'));
 router.use('/categories', require('./category.routes')); // product / service categories
 router.use('/listings', require('./listing.routes')); // public marketplace (approved listings only)
 router.use('/sellers', require('./seller.routes')); // public seller pages ("About the Seller", "Visit Store")
+router.use(require('./cms.routes')); // public CMS: GET /banners, GET /faqs, POST /faqs/:id/view
 
 // ---- SHARED by all user types ----
 router.use('/auth', require('./auth.routes')); // login, forgot/reset password, me
 router.use('/register', require('./registration.routes')); // resume, progress, Step 4 (OTP + submit)
 router.use('/me/listings', require('./myListing.routes')); // seller's own listings (before /me)
-router.use('/me/conversations', require('./chat/conversation.routes')); // chat / Messages (before /me)
 router.use('/me', require('./me.routes')); // logged-in user's own account (profile, payments, KYC documents)
 
 // ---- ONE file per user type ----
@@ -39,5 +39,7 @@ router.use('/admin/users', require('./adminUser.routes'));
 router.use('/admin/kyc-queue', require('./kycQueue.routes'));
 router.use('/admin/categories', require('./adminCategory.routes'));
 router.use('/admin/listings', require('./adminListing.routes'));
+router.use('/admin/banners', require('./adminBanner.routes')); // CMS banners
+router.use('/admin/faqs', require('./adminFaq.routes')); // CMS FAQs + FAQ categories
 
 module.exports = router;
