@@ -14,3 +14,4 @@ router.get('/:id', rules.sellerId, validate, controller.getSeller);
 router.get('/:id/listings', rules.sellerListings, validate, controller.sellerListings);
 
 module.exports = router;
+                           

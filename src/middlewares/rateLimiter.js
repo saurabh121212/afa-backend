@@ -33,4 +33,11 @@ const registerLimiter = make({
   message: 'Too many registration attempts. Please try again later.',
 });
 
-module.exports = { loginLimiter, otpLimiter, registerLimiter };
+// Public Contact Us form: 5 messages per hour per IP (stops spam)
+const contactLimiter = make({
+  windowMinutes: 60,
+  limit: 5,
+  message: 'You have sent several messages already. Please try again in an hour.',
+});
+
+module.exports = { loginLimiter, otpLimiter, registerLimiter, contactLimiter };

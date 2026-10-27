@@ -18,6 +18,7 @@ router.use('/categories', require('./category.routes')); // product / service ca
 router.use('/listings', require('./listing.routes')); // public marketplace (approved listings only)
 router.use('/sellers', require('./seller.routes')); // public seller pages ("About the Seller", "Visit Store")
 router.use(require('./cms.routes')); // public CMS: GET /banners, GET /faqs, POST /faqs/:id/view
+router.use('/contact', require('./contact.routes')); // public Contact Us form
 
 // ---- SHARED by all user types ----
 router.use('/auth', require('./auth.routes')); // login, forgot/reset password, me
@@ -41,5 +42,6 @@ router.use('/admin/categories', require('./adminCategory.routes'));
 router.use('/admin/listings', require('./adminListing.routes'));
 router.use('/admin/banners', require('./adminBanner.routes')); // CMS banners
 router.use('/admin/faqs', require('./adminFaq.routes')); // CMS FAQs + FAQ categories
+router.use('/admin/contact-messages', require('./adminContact.routes')); // Contact Us inbox
 
 module.exports = router;

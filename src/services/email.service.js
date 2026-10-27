@@ -196,8 +196,59 @@ async function sendListingStatusEmail({ to, name, userType, listingName, action,
   });
 }
 
+// ---------- Contact Us ----------
+const contactRef = (id) => `AFA-CNT-${String(id).padStart(6, '0')}`;
+
+// To the sender: "we received your message"
+async function sendContactAcknowledgementEmail({ to, name, id, subjectLabel, message }) {
+  const ref = contactRef(id);
+  const html = layout(
+    'We received your message',
+    `<p>Hello ${escapeHtml(name || '')},</p>
+     <p>Thank you for contacting AFA. Our support team will get back to you within one business day.</p>
+     <p>Your reference number is <strong>${ref}</strong>.</p>
+     ${reasonBlock(subjectLabel, message)}`
+  );
+  return send({
+    to,
+    subject: `We received your message (${ref})`,
+    html,
+    text: `Thank you for contacting AFA. Your reference number is ${ref}. We will reply within one business day.`,
+  });
+}
+
+// To the admin: a new Contact Us message arrived
+async function sendContactAdminAlertEmail({ to, id, fullName, email, phone, senderTypeLabel, subjectLabel, message }) {
+  const ref = contactRef(id);
+  const html = layout(
+    'New Contact Us message',
+    `<p><strong>${escapeHtml(fullName)}</strong> (${escapeHtml(senderTypeLabel)}) sent a message.</p>
+     <p>Email: ${escapeHtml(email)}${phone ? `<br>Phone: ${escapeHtml(phone)}` : ''}</p>
+     ${reasonBlock(subjectLabel, message)}
+     <p>Reply from the AFA admin panel (reference ${ref}).</p>`
+  );
+  return send({ to, subject: `New message: ${subjectLabel} (${ref})`, html, text: `${fullName} <${email}>: ${message}` });
+}
+
+// To the sender: the admin's answer
+async function sendContactReplyEmail({ to, name, id, subjectLabel, originalMessage, reply }) {
+  const ref = contactRef(id);
+  const html = layout(
+    'Reply from AFA Support',
+    `<p>Hello ${escapeHtml(name || '')},</p>
+     <div style="white-space:normal;">${escapeHtml(reply).replace(/\n/g, '<br>')}</div>
+     <p style="color:#6B7280; margin-top:16px;">Your message (${ref}):</p>
+     ${reasonBlock(subjectLabel, originalMessage)}
+     <p>If you need more help, simply send us another message from the Contact Us page.</p>`
+  );
+  return send({ to, subject: `Re: ${subjectLabel} (${ref})`, html, text: `${reply}\n\n--- Your message (${ref}) ---\n${originalMessage}` });
+}
+
 module.exports = {
   verifyEmailConnection,
+  sendContactAcknowledgementEmail,
+  sendContactAdminAlertEmail,
+  sendContactReplyEmail,
   sendPasswordChangedEmail,
   sendListingStatusEmail,
   sendOtpEmail,
