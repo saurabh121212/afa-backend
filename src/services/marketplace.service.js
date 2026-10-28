@@ -49,11 +49,11 @@ function visibleIncludes({ sellerType } = {}) {
     {
       model: Category,
       as: 'category',
-      attributes: ['id', 'name', 'slug'],
+      attributes: ['id', 'name', 'slug', 'vatApplicable'],
       where: { isActive: true },
       required: true,
     },
-    { model: Category, as: 'subCategory', attributes: ['id', 'name', 'slug'] },
+    { model: Category, as: 'subCategory', attributes: ['id', 'name', 'slug', 'parentId', 'vatApplicable'] },
     { model: Location, as: 'region', attributes: ['id', 'name'] },
     { model: Location, as: 'inkhundla', attributes: ['id', 'name'] },
     { model: Location, as: 'umphakatsi', attributes: ['id', 'name'] },
@@ -64,7 +64,7 @@ function visibleIncludes({ sellerType } = {}) {
 // ---------- GET /listings ----------
 async function list(query) {
   const pg = getPagination(query);
-  const where = { status: LISTING_STATUS.ACTIVE };
+  const where = { status: LISTING_STATUS.ACTIVE, vatHold: false };
   const and = [];
 
   if (query.kind) where.kind = query.kind;
@@ -113,7 +113,7 @@ async function list(query) {
 // ---------- GET /listings/:id ----------
 async function getById(id) {
   const listing = await Listing.findOne({
-    where: { id, status: LISTING_STATUS.ACTIVE },
+    where: { id, status: LISTING_STATUS.ACTIVE, vatHold: false },
     include: visibleIncludes(),
   });
   if (!listing) throw new ApiError(404, 'Listing not found', { code: 'LISTING_NOT_FOUND' });
@@ -137,7 +137,7 @@ async function getById(id) {
 // Never the listing itself, and never other listings of the same seller (that's "Visit Store").
 async function related(id, { limit = 8 } = {}) {
   const listing = await Listing.findOne({
-    where: { id, status: LISTING_STATUS.ACTIVE },
+    where: { id, status: LISTING_STATUS.ACTIVE, vatHold: false },
     attributes: ['id', 'userId', 'kind', 'categoryId', 'subCategoryId', 'regionId'],
   });
   if (!listing) throw new ApiError(404, 'Listing not found', { code: 'LISTING_NOT_FOUND' });
@@ -154,7 +154,7 @@ async function related(id, { limit = 8 } = {}) {
     .concat([['publishedAt', 'DESC'], ['id', 'DESC']]);
 
   const rows = await Listing.findAll({
-    where: { status: LISTING_STATUS.ACTIVE, kind: listing.kind, id: { [Op.ne]: listing.id }, userId: { [Op.ne]: listing.userId } },
+    where: { status: LISTING_STATUS.ACTIVE, vatHold: false, kind: listing.kind, id: { [Op.ne]: listing.id }, userId: { [Op.ne]: listing.userId } },
     include: visibleIncludes(),
     order,
     limit,

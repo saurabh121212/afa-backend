@@ -13,7 +13,9 @@ const { getPagination, paginationMeta } = require('../utils/pagination');
 const { toCsvLine } = require('../utils/csv');
 const { displayId } = require('../utils/displayId');
 const { USER_STATUS, USER_STATUS_LABELS, USER_TYPE_LABELS, USER_TYPES } = require('../utils/constants');
-const { getDocumentTypes, isAvailableFor } = require('../config/documentTypes');
+const { getDocumentTypes, isAvailableFor, countsForKyc, VAT_CERTIFICATE_TYPE } = require('../config/documentTypes');
+const vatService = require('./vat.service');
+const adminVatService = require('./adminVat.service');
 const directory = require('./userDirectory');
 const documentService = require('./document.service');
 const emailService = require('./email.service');
@@ -40,6 +42,8 @@ const ACTION_LABEL = {
 
 // ---------- Documents summary (used by details + KYC queue) ----------
 // docs = UserDocument rows (or plain objects with documentType/status)
+// "items" lists every document; the counts only include documents that are part of the
+// account check (countsForKyc), so the optional VAT certificate never shows as "missing".
 function documentSummary(userType, subtype, docs) {
   const byType = new Map(docs.map((d) => [d.documentType, d]));
   const items = Object.entries(getDocumentTypes(userType))
@@ -50,14 +54,16 @@ function documentSummary(userType, subtype, docs) {
         documentType,
         label: rules.label,
         required: rules.required,
+        countsForKyc: countsForKyc(rules),
         status: doc ? doc.status : 'missing', // missing | pending | approved | rejected
         document: doc && typeof doc.toJSON === 'function' ? doc.toJSON() : doc || null,
       };
     });
-  const count = (st) => items.filter((i) => i.status === st).length;
+  const kycItems = items.filter((i) => i.countsForKyc);
+  const count = (st) => kycItems.filter((i) => i.status === st).length;
   return {
-    total: items.length,
-    uploaded: items.length - count('missing'),
+    total: kycItems.length,
+    uploaded: kycItems.length - count('missing'),
     approved: count('approved'),
     pending: count('pending'),
     rejected: count('rejected'),
@@ -188,6 +194,10 @@ async function getDetails(id) {
     allowedActions: allowedActions(user.status),
     user,
     documents: documentSummary(user.userType, dir ? dir.subtype : null, docs),
+    // Sellers only (null for buyers / FIs). Approve / reject comes in the VAT admin actions.
+    vat: vatService.isSellerType(user.userType)
+      ? vatService.vatInfo(user, docs.find((d) => d.documentType === VAT_CERTIFICATE_TYPE) || null)
+      : null,
     notes,
     paymentMethods: paymentMethodService.isAllowed(user.userType) ? paymentMethods : null,
     trustScore: null,
@@ -213,6 +223,12 @@ async function reviewDocument(id, documentType, { status, reason }, adminId) {
     reviewedAt: new Date(),
     reviewedBy: adminId,
   });
+
+  // The VAT certificate also decides the seller's VAT status (see adminVat.service)
+  if (documentType === VAT_CERTIFICATE_TYPE) {
+    const vatStatus = await adminVatService.onCertificateReviewed(id, { status, reason }, adminId);
+    if (vatStatus) return { ...doc.toJSON(), vatStatus };
+  }
   return doc.toJSON();
 }
 
@@ -264,8 +280,9 @@ async function approve(id, adminId) {
   const docs = await UserDocument.findAll({ where: { userId: id } });
   const summary = documentSummary(user.userType, dir ? dir.subtype : null, docs);
   const warnings = [];
-  const missing = summary.items.filter((i) => i.status === 'missing').map((i) => i.label);
-  const notApproved = summary.items.filter((i) => ['pending', 'rejected'].includes(i.status)).map((i) => `${i.label} (${i.status})`);
+  const kycItems = summary.items.filter((i) => i.countsForKyc); // the VAT certificate is checked separately
+  const missing = kycItems.filter((i) => i.status === 'missing').map((i) => i.label);
+  const notApproved = kycItems.filter((i) => ['pending', 'rejected'].includes(i.status)).map((i) => `${i.label} (${i.status})`);
   if (missing.length) warnings.push({ type: 'MISSING_DOCUMENTS', message: `Missing documents: ${missing.join(', ')}`, documents: missing });
   if (notApproved.length) {
     warnings.push({ type: 'DOCUMENTS_NOT_APPROVED', message: `Documents not approved: ${notApproved.join(', ')}`, documents: notApproved });

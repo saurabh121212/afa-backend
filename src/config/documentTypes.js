@@ -6,8 +6,24 @@
 //   onlyForSubtypes  -> (optional) only these sub-types may upload it,
 //                       e.g. buyer documents only for 'business' buyers.
 //                       The user's sub-type comes from userTypes.registry.js (getSubtype).
+//   countsForKyc     -> (optional) false = NOT part of the account check: it is not counted in
+//                       "uploaded X of Y", "missing" or "Ready for approval".
+//                       Used for the VAT certificate, which only VAT-registered sellers have.
 //
 // When Trader / Logistics / FI registration is built, add their list here.
+
+// ERS VAT Registration Certificate: optional, only for VAT-registered sellers.
+// The VAT reference is the seller's TIN; the admin checks the TIN on the certificate.
+const VAT_CERTIFICATE = {
+  label: 'VAT Registration Certificate',
+  description:
+    'VAT registration certificate issued by the Eswatini Revenue Service (ERS). Only needed if you are VAT-registered and want to sell VAT-applicable items',
+  formats: ['jpg', 'png', 'pdf'],
+  maxSizeMB: 5,
+  required: false,
+  countsForKyc: false,
+};
+const VAT_CERTIFICATE_TYPE = 'vat_certificate';
 
 const DOCUMENT_TYPES = {
   farmer: {
@@ -41,6 +57,7 @@ const DOCUMENT_TYPES = {
       maxSizeMB: 2,
       required: false,
     },
+    [VAT_CERTIFICATE_TYPE]: VAT_CERTIFICATE,
   },
 
   buyer: {
@@ -111,6 +128,7 @@ const DOCUMENT_TYPES = {
       maxSizeMB: 5,
       required: false,
     },
+    [VAT_CERTIFICATE_TYPE]: VAT_CERTIFICATE,
   },
   logistics: {
     business_registration: {
@@ -148,6 +166,7 @@ const DOCUMENT_TYPES = {
       maxSizeMB: 5,
       required: false,
     },
+    [VAT_CERTIFICATE_TYPE]: VAT_CERTIFICATE,
   },
   financial_institution: {
     institution_registration: {
@@ -205,4 +224,14 @@ const notAvailableFor = (userType, subtype) =>
     .filter(([, rules]) => !isAvailableFor(rules, subtype))
     .map(([documentType]) => documentType);
 
-module.exports = { getDocumentTypes, getDocumentType, isAvailableFor, notAvailableFor };
+// Is this document part of the account (KYC) check? (false for the VAT certificate)
+const countsForKyc = (rules) => rules.countsForKyc !== false;
+
+module.exports = {
+  getDocumentTypes,
+  getDocumentType,
+  isAvailableFor,
+  notAvailableFor,
+  countsForKyc,
+  VAT_CERTIFICATE_TYPE,
+};

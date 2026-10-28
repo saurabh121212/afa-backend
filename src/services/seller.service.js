@@ -13,7 +13,7 @@ const notFound = () => new ApiError(404, 'Seller not found', { code: 'SELLER_NOT
 // Live listings of one seller (same rules as the marketplace: active listing in an active category)
 const countActiveListings = (userId) =>
   Listing.count({
-    where: { userId, status: LISTING_STATUS.ACTIVE },
+    where: { userId, status: LISTING_STATUS.ACTIVE, vatHold: false },
     include: [{ model: Category, as: 'category', attributes: [], where: { isActive: true }, required: true }],
   });
 

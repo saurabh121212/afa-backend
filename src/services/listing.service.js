@@ -14,6 +14,11 @@
 //
 // Editing an active / paused listing sends it back to review, EXCEPT inventory changes
 // (quantity, availability, available date) - see PATCH /me/listings/:id/inventory.
+//
+// VAT: a listing in a VAT-applicable category (or sub-category) can only be saved / sent for
+// review by a seller whose VAT registration is approved (code VAT_REGISTRATION_REQUIRED).
+// Delivery: deliveryType pickup | delivery | both. When the SELLER delivers, they set a fee per
+// region (deliveryFees). A region not in the list = no delivery there. Pickup is always free.
 const path = require('path');
 const fs = require('fs/promises');
 const { Op } = require('sequelize');
@@ -39,6 +44,10 @@ const {
   LISTING_PHOTOS,
 } = require('../config/listingOptions');
 const locationService = require('./location.service');
+const vatHold = require('./vatHold.service');
+const { VAT_STATUS } = require('../config/vat');
+
+const { listingIsVat } = vatHold;
 
 const { sequelize, Listing, ListingPhoto, Category, Location } = models;
 const S = LISTING_STATUS;
@@ -50,7 +59,7 @@ const COMMON_FIELDS = [
 ];
 const PRODUCT_FIELDS = [
   'brand', 'sku', 'quantity', 'quantityUnit', 'minOrderQuantity', 'minOrderUnit', 'availableFrom',
-  'deliveryType', 'deliveryDuration', 'deliveryDurationUnit', 'logisticsBy',
+  'deliveryType', 'deliveryDuration', 'deliveryDurationUnit', 'logisticsBy', 'deliveryFees', 'nonReturnable',
 ];
 const SERVICE_FIELDS = [
   'vehicleRegistration', 'makeModel', 'capacity', 'capacityUnit', 'minBooking', 'minBookingUnit',
@@ -60,7 +69,7 @@ const FIELDS_BY_KIND = {
   product: [...COMMON_FIELDS, ...PRODUCT_FIELDS],
   service: [...COMMON_FIELDS, ...SERVICE_FIELDS],
 };
-const NOT_CLEARABLE = ['name', 'useRegisteredAddress'];
+const NOT_CLEARABLE = ['name', 'useRegisteredAddress', 'nonReturnable'];
 // Changing only these does NOT send an active listing back to review
 const INVENTORY_FIELDS = ['quantity', 'availability', 'availableFrom'];
 const LOCATION_FIELDS = ['address', 'regionId', 'inkhundlaId', 'umphakatsiId'];
@@ -103,6 +112,20 @@ const num = (v) => (v === null || v === undefined ? null : Number(v));
 const photoUrl = (filePath) => `/uploads/${String(filePath).replace(/^public\//, '')}`;
 const loc = (l) => (l ? { id: l.id, name: l.name } : null);
 const cat = (c) => (c ? { id: c.id, name: c.name, slug: c.slug } : null);
+const money = (v) => `${CURRENCY.symbol} ${Number(v).toFixed(2)}`;
+
+// Does the seller deliver (and so charge a delivery fee)?
+const sellerDelivers = (l) => (l.deliveryType === 'delivery' || l.deliveryType === 'both') && l.logisticsBy !== 'buyer';
+
+function deliveryFeesShape(l) {
+  if (!sellerDelivers(l)) return [];
+  return (l.deliveryFees || []).map((d) => ({
+    regionId: d.regionId,
+    regionName: d.regionName || null,
+    fee: Number(d.fee),
+    feeLabel: Number(d.fee) === 0 ? 'Free delivery' : money(d.fee),
+  }));
+}
 
 function priceLabel(listing) {
   if (listing.price === null || listing.price === undefined) return null;
@@ -138,6 +161,7 @@ function baseShape(listing) {
     priceUnitLabel: label('priceUnit'),
     priceLabel: priceLabel(l), // "E 5.20 / kg", "E 8.50 per km"
     currency: CURRENCY.code,
+    isVatApplicable: listingIsVat(l.category, l.subCategory), // VAT is added at checkout
     availability: l.availability,
     availabilityLabel: label('availability'),
     ...(isProduct
@@ -157,6 +181,10 @@ function baseShape(listing) {
           deliveryDurationUnit: l.deliveryDurationUnit,
           logisticsBy: l.logisticsBy,
           logisticsByLabel: l.logisticsBy ? LOGISTICS_BY[l.logisticsBy] : null,
+          pickupAvailable: l.deliveryType === 'pickup' || l.deliveryType === 'both',
+          deliveryAvailable: sellerDelivers(l) && (l.deliveryFees || []).length > 0,
+          deliveryFees: deliveryFeesShape(l), // regions the seller delivers to + fee
+          nonReturnable: Boolean(l.nonReturnable),
         }
       : {
           vehicleRegistration: l.vehicleRegistration,
@@ -190,6 +218,8 @@ function toSeller(listing) {
     status: listing.status,
     statusLabel: LISTING_STATUS_LABELS[listing.status],
     statusReason: listing.statusReason, // why rejected / flagged / disabled
+    vatHold: Boolean(listing.vatHold), // hidden from the website: needs VAT registration
+    vatHoldAt: listing.vatHoldAt || null,
     submittedAt: listing.submittedAt,
     createdAt: listing.createdAt,
     missingForReview: missingForReview(listing, (listing.photos || []).length),
@@ -198,8 +228,8 @@ function toSeller(listing) {
 
 // ---------- loading ----------
 const listingInclude = () => [
-  { model: Category, as: 'category', attributes: ['id', 'name', 'slug', 'parentId', 'appliesTo', 'isActive'] },
-  { model: Category, as: 'subCategory', attributes: ['id', 'name', 'slug', 'parentId', 'isActive'] },
+  { model: Category, as: 'category', attributes: ['id', 'name', 'slug', 'parentId', 'appliesTo', 'isActive', 'vatApplicable', 'refundPolicy'] },
+  { model: Category, as: 'subCategory', attributes: ['id', 'name', 'slug', 'parentId', 'isActive', 'vatApplicable'] },
   { model: Location, as: 'region', attributes: ['id', 'name'] },
   { model: Location, as: 'inkhundla', attributes: ['id', 'name'] },
   { model: Location, as: 'umphakatsi', attributes: ['id', 'name'] },
@@ -238,6 +268,7 @@ function missingForReview(l, photoCount) {
     if (l.minOrderQuantity !== null && l.minOrderQuantity !== undefined) need('minOrderUnit', 'Minimum order unit is required');
     if (l.deliveryDuration !== null && l.deliveryDuration !== undefined) need('deliveryDurationUnit', 'Delivery duration unit is required');
     if (l.deliveryType === 'delivery' || l.deliveryType === 'both') need('logisticsBy', 'Choose who manages the logistics');
+    if (sellerDelivers(l) && l.logisticsBy) need('deliveryFees', 'Add a delivery fee for at least one region');
   } else {
     need('coverageRegionIds', 'Coverage area is required');
     if (l.capacity !== null && l.capacity !== undefined) need('capacityUnit', 'Capacity unit is required');
@@ -268,22 +299,59 @@ function checkForeignFields(kind, rawBody) {
   if (errors.length) throw validationError(errors);
 }
 
-// Category must be an active MAIN category of the right tab; sub-category must belong to it
+// Category must be an active MAIN category of the right tab; sub-category must belong to it.
+// Returns { category, subCategory } (empty when no category is chosen).
 async function checkCategory(kind, categoryId, subCategoryId) {
   if (!categoryId) {
     if (subCategoryId) throw validationError([{ field: 'categoryId', message: 'Choose a category first' }]);
-    return;
+    return {};
   }
   const category = await Category.findOne({ where: { id: categoryId, parentId: null, isActive: true } });
   if (!category || !(category.appliesTo === kind || category.appliesTo === 'both')) {
     throw validationError([{ field: 'categoryId', message: `Choose an active ${kind} category` }]);
   }
+  let sub = null;
   if (subCategoryId) {
-    const sub = await Category.findOne({ where: { id: subCategoryId, parentId: category.id, isActive: true } });
+    sub = await Category.findOne({ where: { id: subCategoryId, parentId: category.id, isActive: true } });
     if (!sub) {
       throw validationError([{ field: 'subCategoryId', message: `This sub-category does not belong to ${category.name}` }]);
     }
   }
+  return { category, subCategory: sub };
+}
+
+// Only a VAT-approved seller may use a VAT-applicable category / sub-category
+const vatRequiredError = (field, name) =>
+  new ApiError(422, `${name} is VAT-applicable. Only VAT-registered sellers can list it.`, {
+    code: 'VAT_REGISTRATION_REQUIRED',
+    errors: [{ field, message: 'Get your VAT registration approved first (Profile -> VAT registration)' }],
+  });
+
+function assertVatAllowed(user, category, subCategory) {
+  if (!category || user.vatStatus === VAT_STATUS.APPROVED) return;
+  if (listingIsVat(category, subCategory)) {
+    const vatOn = subCategory && subCategory.vatApplicable === true ? subCategory : category;
+    throw vatRequiredError(vatOn === subCategory ? 'subCategoryId' : 'categoryId', vatOn.name);
+  }
+}
+
+// Delivery fees: one fee per region, regions must exist. Returns the list to save.
+async function cleanDeliveryFees(fees) {
+  if (!fees || !fees.length) return null;
+  const seen = new Set();
+  const errors = [];
+  fees.forEach((f, i) => {
+    if (seen.has(f.regionId)) errors.push({ field: `deliveryFees[${i}].regionId`, message: 'Each region can only be listed once' });
+    seen.add(f.regionId);
+  });
+  if (errors.length) throw validationError(errors);
+  const ids = [...seen];
+  await locationService.assertRegions(ids, 'deliveryFees');
+  const regions = await Location.findAll({ where: { id: ids }, attributes: ['id', 'name'] });
+  const nameOf = new Map(regions.map((r) => [r.id, r.name]));
+  return fees
+    .map((f) => ({ regionId: f.regionId, regionName: nameOf.get(f.regionId) || null, fee: Math.round(Number(f.fee) * 100) / 100 }))
+    .sort((a, b) => a.regionId - b.regionId);
 }
 
 // The seller's registered address (farmers: farm location if filled in, else home address)
@@ -326,7 +394,30 @@ async function buildValues(user, kind, data, rawBody, current = null) {
     ) {
       values.subCategoryId = null;
     }
-    await checkCategory(kind, pick('categoryId'), pick('subCategoryId'));
+    const { category, subCategory } = await checkCategory(kind, pick('categoryId'), pick('subCategoryId'));
+    assertVatAllowed(user, category, subCategory);
+  }
+
+  // Delivery fees (products): only when the seller delivers
+  if (kind === 'product') {
+    if (values.deliveryFees !== undefined) values.deliveryFees = await cleanDeliveryFees(values.deliveryFees);
+    const final = { deliveryType: pick('deliveryType'), logisticsBy: pick('logisticsBy') };
+    if (!sellerDelivers(final)) {
+      const sentFees = Array.isArray(rawBody.deliveryFees) && rawBody.deliveryFees.length > 0;
+      if (sentFees && final.deliveryType) {
+        throw validationError([
+          {
+            field: 'deliveryFees',
+            message:
+              final.deliveryType === 'pickup'
+                ? 'Delivery fees are not used for a pickup-only listing'
+                : 'Delivery fees are not used when the buyer arranges transport',
+          },
+        ]);
+      }
+      if (final.deliveryType && (current ? current.deliveryFees : values.deliveryFees)) values.deliveryFees = null;
+    }
+    if (values.nonReturnable === null) delete values.nonReturnable;
   }
 
   // Pre-order: keep the date only for pre-orders
@@ -394,12 +485,18 @@ async function getMine(user, id) {
   return toSeller(await findOwn(user, id));
 }
 
-// Send for admin review (status -> pending). Throws 422 listing what is missing.
-async function sendForReview(listing, transaction) {
+// Send for admin review (status -> pending). Throws 422 listing what is missing,
+// or VAT_REGISTRATION_REQUIRED (the seller's VAT status may have changed since saving).
+async function sendForReview(user, listing, transaction) {
   const photoCount = await ListingPhoto.count({ where: { listingId: listing.id }, transaction });
   const missing = missingForReview(listing, photoCount);
   if (missing.length) {
     throw validationError(missing, 'Please complete the listing before publishing it');
+  }
+  if (listing.categoryId) {
+    const category = await Category.findByPk(listing.categoryId, { transaction });
+    const sub = listing.subCategoryId ? await Category.findByPk(listing.subCategoryId, { transaction }) : null;
+    assertVatAllowed(user, category, sub);
   }
   await listing.update(
     { status: S.PENDING, submittedAt: new Date(), statusReason: null },
@@ -418,7 +515,7 @@ async function create(user, data, rawBody = {}) {
   let submitError = null;
   if (data.submit === true) {
     try {
-      await sendForReview(listing);
+      await sendForReview(user, listing);
     } catch (err) {
       if (err.code !== 'VALIDATION_ERROR') throw err;
       submitError = err;
@@ -451,10 +548,14 @@ async function update(user, id, data, rawBody = {}) {
 
     let reReview = false;
     if (data.submit === true && [S.DRAFT, S.REJECTED, S.FLAGGED].includes(listing.status)) {
-      await sendForReview(listing, transaction);
+      await sendForReview(user, listing, transaction);
     } else if (contentChanged && [S.ACTIVE, S.PAUSED].includes(listing.status)) {
-      await sendForReview(listing, transaction); // a changed live listing is checked again
+      await sendForReview(user, listing, transaction); // a changed live listing is checked again
       reReview = true;
+    }
+    // A new category may end (or start) a VAT hold
+    if (changed.includes('categoryId') || changed.includes('subCategoryId')) {
+      await vatHold.forListing(listing.id, { transaction });
     }
     return { listing: toSeller(await findOwn(user, id, { transaction })), reReview };
   });
@@ -473,7 +574,7 @@ async function submit(user, id) {
         code: 'INVALID_STATUS_CHANGE',
       });
     }
-    await sendForReview(listing, transaction);
+    await sendForReview(user, listing, transaction);
     return toSeller(await findOwn(user, id, { transaction }));
   });
 }
@@ -585,7 +686,7 @@ async function addPhotos(user, id, files) {
         next += 1;
       }
       // New photos on a live listing must be checked by the admin again
-      if ([S.ACTIVE, S.PAUSED].includes(listing.status)) await sendForReview(listing, transaction);
+      if ([S.ACTIVE, S.PAUSED].includes(listing.status)) await sendForReview(user, listing, transaction);
     });
     return toSeller(await findOwn(user, id));
   } catch (err) {
@@ -642,6 +743,8 @@ async function reorderPhotos(user, id, { photoIds }) {
 }
 
 module.exports = {
+  listingIsVat,
+  sellerDelivers,
   listMine,
   getMine,
   create,

@@ -16,6 +16,7 @@ const { USER_STATUS_LABELS } = require('../utils/constants');
 const { LISTING_STATUS, LISTING_STATUS_LABELS } = require('../config/listingOptions');
 const directory = require('./userDirectory');
 const emailService = require('./email.service');
+const vatHold = require('./vatHold.service');
 const { baseShape, missingForReview } = require('./listing.service');
 const { sellerShape } = require('./marketplace.service');
 
@@ -34,8 +35,8 @@ const notFound = () => new ApiError(404, 'Listing not found', { code: 'LISTING_N
 
 const adminIncludes = () => [
   { model: User, as: 'seller', attributes: ['id', 'userType', 'status', 'email', 'mobile'] },
-  { model: Category, as: 'category', attributes: ['id', 'name', 'slug'] },
-  { model: Category, as: 'subCategory', attributes: ['id', 'name', 'slug'] },
+  { model: Category, as: 'category', attributes: ['id', 'name', 'slug', 'vatApplicable'] },
+  { model: Category, as: 'subCategory', attributes: ['id', 'name', 'slug', 'parentId', 'vatApplicable'] },
   { model: Location, as: 'region', attributes: ['id', 'name'] },
   { model: Location, as: 'inkhundla', attributes: ['id', 'name'] },
   { model: Location, as: 'umphakatsi', attributes: ['id', 'name'] },
@@ -48,6 +49,7 @@ function toAdmin(listing, dir) {
     status: listing.status,
     statusLabel: LISTING_STATUS_LABELS[listing.status],
     statusReason: listing.statusReason,
+    vatHold: Boolean(listing.vatHold), // hidden from the website: seller needs VAT registration
     allowedActions: allowedActions(listing.status),
     submittedAt: listing.submittedAt,
     reviewedAt: listing.reviewedAt,
@@ -66,6 +68,7 @@ async function buildWhere(query) {
   const where = { status: query.status ? query.status : { [Op.ne]: S.DRAFT } };
   if (query.kind) where.kind = query.kind;
   if (query.categoryId) where.categoryId = query.categoryId;
+  if (typeof query.vatHold === 'boolean') where.vatHold = query.vatHold;
   if (query.search) {
     const like = `%${query.search}%`;
     const sellerIds = await directory.findUserIdsByName(query.search);
@@ -90,8 +93,11 @@ async function stats() {
   grouped.forEach((g) => {
     byStatus[g.status] = Number(g.total);
   });
+  // Live listings hidden because the seller is not VAT-registered
+  const vatHoldCount = await Listing.count({ where: { status: { [Op.ne]: S.DRAFT }, vatHold: true } });
   return {
     totalListings: Object.values(byStatus).reduce((a, b) => a + b, 0),
+    vatHold: vatHoldCount,
     pendingReview: byStatus.pending,
     active: byStatus.active,
     flagged: byStatus.flagged,
@@ -206,6 +212,8 @@ async function changeStatus(id, action, adminId, { reason } = {}) {
       },
       { transaction }
     );
+    // Approving a VAT item of a seller who lost VAT registration in the meantime -> hidden (vatHold)
+    await vatHold.forListing(listing.id, { transaction });
     return listing;
   });
 

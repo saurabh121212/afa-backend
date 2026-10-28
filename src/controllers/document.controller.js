@@ -13,13 +13,19 @@ const list = asyncHandler(async (req, res) => {
 // POST .../register/documents/:documentType   (form-data, field "file")
 const upload = asyncHandler(async (req, res) => {
   const data = await documentService.upload(req.user, req.params.documentType, req.file);
-  res.status(201).json({ success: true, message: `${data.label} uploaded`, data });
+  const message = data.vatStatus
+    ? `${data.label} uploaded. Your VAT registration will be checked again by the AFA team.`
+    : `${data.label} uploaded`;
+  res.status(201).json({ success: true, message, data });
 });
 
 // DELETE .../register/documents/:documentType
 const remove = asyncHandler(async (req, res) => {
-  await documentService.remove(req.user, req.params.documentType);
-  res.json({ success: true, message: 'Document removed' });
+  const data = await documentService.remove(req.user, req.params.documentType);
+  const message = data.vatStatus
+    ? 'Document removed. You are no longer VAT-registered on AFA.'
+    : 'Document removed';
+  res.json({ success: true, message, data });
 });
 
 // GET .../register/documents/:documentType/file

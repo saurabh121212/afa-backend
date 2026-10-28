@@ -6,7 +6,8 @@ const fs = require('fs/promises');
 const config = require('../config');
 const { UserDocument } = require('../models');
 const ApiError = require('../utils/ApiError');
-const { getDocumentTypes, getDocumentType, isAvailableFor } = require('../config/documentTypes');
+const { getDocumentTypes, getDocumentType, isAvailableFor, countsForKyc, VAT_CERTIFICATE_TYPE } = require('../config/documentTypes');
+const vatService = require('./vat.service');
 const { kindForMimeType, fileMatchesKind, formatLabels } = require('../utils/fileTypes');
 
 const uploadRoot = () => path.resolve(config.upload.dir);
@@ -44,6 +45,7 @@ async function list(user, { subtype = null, subtypeLabel = (s) => s } = {}) {
       acceptedFormats: formatLabels(rules.formats),
       maxSizeMB: rules.maxSizeMB,
       required: rules.required,
+      countsForKyc: countsForKyc(rules), // false = optional extra (VAT certificate), not in the counts
       // e.g. "Business / Food Processor accounts only" badge in Figma
       onlyFor: rules.onlyForSubtypes ? rules.onlyForSubtypes.map(subtypeLabel) : null,
       available: isAvailableFor(rules, subtype),
@@ -54,8 +56,8 @@ async function list(user, { subtype = null, subtypeLabel = (s) => s } = {}) {
 
   return {
     registrationStep: user.registrationStep,
-    uploadedCount: uploaded.length,
-    totalCount: documents.filter((d) => d.available).length,
+    uploadedCount: documents.filter((d) => d.available && d.countsForKyc && d.uploaded).length,
+    totalCount: documents.filter((d) => d.available && d.countsForKyc).length,
     documents,
   };
 }
@@ -66,6 +68,7 @@ async function upload(user, documentType, file) {
   const rules = getDocumentType(user.userType, documentType);
   const kind = kindForMimeType(file.mimetype, rules.formats);
 
+  let document;
   try {
     // The file's real content must match its claimed type
     if (!(await fileMatchesKind(file.path, kind))) {
@@ -91,7 +94,6 @@ async function upload(user, documentType, file) {
     };
 
     const existing = await UserDocument.findOne({ where: { userId: user.id, documentType } });
-    let document;
     if (existing) {
       const oldPath = existing.filePath;
       document = await existing.update(values);
@@ -99,13 +101,21 @@ async function upload(user, documentType, file) {
     } else {
       document = await UserDocument.create({ userId: user.id, documentType, ...values });
     }
-
-    return { documentType, label: rules.label, document: document.toJSON() };
   } catch (err) {
     // Anything failed -> don't leave the uploaded file lying around
     await deleteFileQuietly(file.path);
     throw err;
   }
+
+  // A new VAT certificate needs a fresh review: approved / rejected VAT goes back to "pending"
+  const vatChange = documentType === VAT_CERTIFICATE_TYPE ? await vatService.onCertificateUploaded(user.id) : null;
+
+  return {
+    documentType,
+    label: rules.label,
+    document: document.toJSON(),
+    ...(vatChange ? { vatStatus: vatChange.to } : {}),
+  };
 }
 
 // DELETE .../documents/:documentType -> the "X" on a document card
@@ -117,6 +127,10 @@ async function remove(user, documentType) {
   const filePath = doc.filePath;
   await doc.destroy();
   await deleteFileQuietly(absolutePath(filePath));
+
+  // No certificate = no proof of VAT registration
+  const vatChange = documentType === VAT_CERTIFICATE_TYPE ? await vatService.onCertificateRemoved(user.id) : null;
+  return { documentType, ...(vatChange ? { vatStatus: vatChange.to } : {}) };
 }
 
 // Delete several document types at once (e.g. business documents when a buyer

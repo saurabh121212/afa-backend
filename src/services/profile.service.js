@@ -22,8 +22,16 @@ const paymentMethodService = require('./paymentMethod.service');
 const { getHandler } = require('./userTypes.registry');
 const { loadUserWithProfile } = require('./registration.service');
 const { documentSummary } = require('./adminUser.service');
+const vatService = require('./vat.service');
+const { VAT_CERTIFICATE_TYPE } = require('../config/documentTypes');
 
 const { sequelize, User, UserDocument } = models;
+
+// VAT block (sellers only; null for buyers / FIs). Uses the documents already loaded.
+const vatBlock = (user, docs) =>
+  vatService.isSellerType(user.userType)
+    ? vatService.vatInfo(user, docs.find((d) => d.documentType === VAT_CERTIFICATE_TYPE) || null)
+    : null;
 
 const MAIN_LOCATION = ['regionId', 'inkhundlaId', 'umphakatsiId'];
 
@@ -154,6 +162,7 @@ async function getProfile(userId) {
     passwordChangedAt: user.passwordChangedAt, // null = "Last changed on registration"
     profile: user[handler.profileAs] || null,
     documents: docSummary,
+    vat: vatBlock(user, docs), // sellers: VAT registration status; null for buyers / FIs
     paymentMethods, // null for financial institutions (not available)
     editing: {
       lockedFields: Object.keys(rules.locked),

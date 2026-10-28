@@ -1,9 +1,11 @@
 // Product / service categories: Main category -> Sub-category (one table, linked by parentId).
 //
 //   appliesTo -> main categories only: 'product' | 'service' | 'both'
+//   vatApplicable -> main: true / false; sub-category: null = same as main, true / false = override
+//   refundPolicy  -> main categories only; null = automatic from the seller type
 //   isActive  -> false = hidden from sellers and the website
 //   deletedAt -> soft delete (paranoid): row kept in the database
-const { APPLIES_TO } = require('../config/categories');
+const { APPLIES_TO, REFUND_POLICIES } = require('../config/categories');
 
 module.exports = (sequelize, DataTypes) => {
   const Category = sequelize.define(
@@ -29,6 +31,14 @@ module.exports = (sequelize, DataTypes) => {
       },
       appliesTo: {
         type: DataTypes.ENUM(...APPLIES_TO),
+        allowNull: true,
+      },
+      vatApplicable: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+      },
+      refundPolicy: {
+        type: DataTypes.ENUM(...Object.keys(REFUND_POLICIES)),
         allowNull: true,
       },
       description: {

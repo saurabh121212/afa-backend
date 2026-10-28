@@ -43,5 +43,7 @@ router.use('/admin/listings', require('./adminListing.routes'));
 router.use('/admin/banners', require('./adminBanner.routes')); // CMS banners
 router.use('/admin/faqs', require('./adminFaq.routes')); // CMS FAQs + FAQ categories
 router.use('/admin/contact-messages', require('./adminContact.routes')); // Contact Us inbox
+router.use('/admin/vat-registrations', require('./adminVat.routes')); // sellers' VAT registration review
+router.use('/admin/settings', require('./adminSetting.routes')); // System Settings (VAT rate, payment time limit...)
 
 module.exports = router;

@@ -33,7 +33,9 @@ const create = asyncHandler(async (req, res) => {
 // PUT /admin/categories/:id
 const update = asyncHandler(async (req, res) => {
   const data = await service.update(req.validated.id, req.validated);
-  res.json({ success: true, message: `${levelWord(data.level)} updated`, data });
+  const hidden = data.listingsHidden ? ` ${data.listingsHidden} listing(s) of sellers who are not VAT-registered are now hidden.` : '';
+  const shown = data.listingsShown ? ` ${data.listingsShown} hidden listing(s) are visible again.` : '';
+  res.json({ success: true, message: `${levelWord(data.level)} updated.${hidden}${shown}`.replace(/\.$/, ''), data });
 });
 
 // POST /admin/categories/:id/icon   (form-data, field "file")
@@ -77,4 +79,12 @@ const importTemplate = (req, res) => {
   res.send(service.importTemplate());
 };
 
-module.exports = { stats, list, getById, create, update, setIcon, setStatus, remove, importCsv, importTemplate };
+// GET /admin/categories/:id/vat-impact?vatApplicable=   ("are you sure?" box before changing VAT)
+const vatImpact = asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await service.vatImpact(req.validated.id, req.validated.vatApplicable) });
+});
+
+// GET /admin/categories/options
+const options = (req, res) => res.json({ success: true, data: service.options() });
+
+module.exports = { options, vatImpact, stats, list, getById, create, update, setIcon, setStatus, remove, importCsv, importTemplate };

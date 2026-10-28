@@ -140,7 +140,7 @@ async function findMany(userIds) {
   const ids = [...new Set(userIds)].filter(Boolean);
   if (!ids.length) return new Map();
   const rows = await sequelize.query(
-    `SELECT u.id AS user_id, u.user_type, u.status, d.display_name, d.sub_name, d.region_id, r.name AS region_name
+    `SELECT u.id AS user_id, u.user_type, u.status, d.display_name, d.sub_name, d.tin, d.region_id, r.name AS region_name
        FROM users u
        LEFT JOIN (${DIRECTORY_SQL}) d ON d.user_id = u.id
        LEFT JOIN locations r ON r.id = d.region_id

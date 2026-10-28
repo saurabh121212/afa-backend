@@ -244,7 +244,116 @@ async function sendContactReplyEmail({ to, name, id, subjectLabel, originalMessa
   return send({ to, subject: `Re: ${subjectLabel} (${ref})`, html, text: `${reply}\n\n--- Your message (${ref}) ---\n${originalMessage}` });
 }
 
+// ---------- VAT registration (sellers) ----------
+// Listing names in an email: at most 20, then "and N more"
+function listingNamesHtml(listings = []) {
+  if (!listings.length) return '';
+  const shown = listings.slice(0, 20).map((l) => `<li>${escapeHtml(l.name)}</li>`).join('');
+  const more = listings.length > 20 ? `<li>and ${listings.length - 20} more</li>` : '';
+  return `<ul style="margin:8px 0 12px; padding-left:20px;">${shown}${more}</ul>`;
+}
+const listingNamesText = (listings = []) =>
+  listings.slice(0, 20).map((l) => `- ${l.name}`).join('\n') + (listings.length > 20 ? `\n- and ${listings.length - 20} more` : '');
+
+function listingsBlocks({ hidden = [], shown = [] }) {
+  return (
+    (hidden.length
+      ? `<p>These listings are <strong>hidden from the marketplace</strong> until your VAT registration is approved:</p>${listingNamesHtml(hidden)}`
+      : '') +
+    (shown.length ? `<p>These listings are <strong>visible again</strong> on the marketplace:</p>${listingNamesHtml(shown)}` : '')
+  );
+}
+
+const VAT_EMAIL = {
+  approved: {
+    subject: 'Your VAT registration is approved',
+    title: 'VAT registration approved',
+    text: 'Your VAT registration has been approved. You can now list VAT-applicable items on the AFA Marketplace.',
+  },
+  rejected: {
+    subject: 'Your VAT registration was not approved',
+    title: 'VAT registration not approved',
+    text: 'Your VAT registration was not approved. Please upload a valid VAT Registration Certificate and apply again from your profile.',
+  },
+  removed: {
+    subject: 'Your VAT registration was removed',
+    title: 'VAT registration removed',
+    text: 'The AFA team removed your VAT registration. You can no longer list VAT-applicable items. Upload a valid VAT Registration Certificate to apply again.',
+  },
+  review_again: {
+    subject: 'Your new VAT certificate is being checked',
+    title: 'VAT certificate under review',
+    text: 'You uploaded a new VAT Registration Certificate. The AFA team will check it again.',
+  },
+};
+
+// Seller: VAT status changed. hidden / shown = listings affected by the change
+async function sendVatStatusEmail({ to, name, userType, status, reason, hidden = [], shown = [] }) {
+  const t = VAT_EMAIL[status];
+  if (!t) return null;
+  const html = layout(
+    t.title,
+    `<p>Hello ${escapeHtml(name || '')},</p>
+     ${accountLine(userType)}
+     <p>${t.text}</p>
+     ${reasonBlock('Reason', reason)}
+     ${listingsBlocks({ hidden, shown })}`
+  );
+  const text = [
+    t.text,
+    reason ? `Reason: ${reason}` : '',
+    hidden.length ? `Hidden until your VAT registration is approved:\n${listingNamesText(hidden)}` : '',
+    shown.length ? `Visible again:\n${listingNamesText(shown)}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  return send({ to, subject: `${t.subject}${typeLabel(userType)}`, html, text });
+}
+
+// Seller: the admin changed a category's VAT setting, so some listings were hidden / shown again
+async function sendVatListingsEmail({ to, name, userType, hidden = [], shown = [] }) {
+  const html = layout(
+    'VAT update for your listings',
+    `<p>Hello ${escapeHtml(name || '')},</p>
+     ${accountLine(userType)}
+     ${
+       hidden.length
+         ? `<p>Some of your listings are now in a <strong>VAT-applicable</strong> category. Only VAT-registered sellers can sell these items, so they are <strong>hidden</strong> from the marketplace:</p>${listingNamesHtml(hidden)}
+            <p>To show them again, upload your VAT Registration Certificate and switch on "I am VAT-registered" in your profile, or move the listings to another category.</p>`
+         : ''
+     }
+     ${shown.length ? `<p>These listings are <strong>visible again</strong> on the marketplace:</p>${listingNamesHtml(shown)}` : ''}`
+  );
+  const text = [
+    hidden.length ? `Hidden (VAT-applicable category, VAT registration needed):\n${listingNamesText(hidden)}` : '',
+    shown.length ? `Visible again:\n${listingNamesText(shown)}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  return send({ to, subject: `VAT update for your listings${typeLabel(userType)}`, html, text });
+}
+
+// Admin: a seller asked for VAT registration (or uploaded a new certificate)
+async function sendVatRequestAdminEmail({ to, sellerName, userType, tin, newCertificate }) {
+  const what = newCertificate ? 'uploaded a new VAT Registration Certificate' : 'applied for VAT registration';
+  const html = layout(
+    'VAT registration to review',
+    `<p><strong>${escapeHtml(sellerName || 'A seller')}</strong>${typeLabel(userType)} ${what}.</p>
+     <p>TIN on AFA: <strong>${escapeHtml(tin || '-')}</strong>. Check that it matches the TIN on the certificate.</p>
+     <p>Review it in the AFA admin panel: VAT Registrations.</p>`
+  );
+  return send({
+    to,
+    subject: `VAT registration to review: ${sellerName || 'seller'}`,
+    html,
+    text: `${sellerName || 'A seller'}${typeLabel(userType)} ${what}. TIN: ${tin || '-'}.`,
+  });
+}
+
 module.exports = {
+  sendVatStatusEmail,
+  sendVatListingsEmail,
+  sendVatRequestAdminEmail,
   verifyEmailConnection,
   sendContactAcknowledgementEmail,
   sendContactAdminAlertEmail,

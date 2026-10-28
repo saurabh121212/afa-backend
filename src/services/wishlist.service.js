@@ -19,7 +19,7 @@ const MAX_WISHLIST_ITEMS = 500;
 async function visibleIds(listingIds) {
   if (!listingIds.length) return new Set();
   const rows = await Listing.findAll({
-    where: { id: listingIds, status: LISTING_STATUS.ACTIVE },
+    where: { id: listingIds, status: LISTING_STATUS.ACTIVE, vatHold: false },
     attributes: ['id'],
     include: visibleIncludes().filter((inc) => inc.required), // seller approved + category active
   });

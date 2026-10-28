@@ -9,6 +9,11 @@
 //   - Delete = SOFT delete (deleted_at). A main category can only be deleted when it has
 //     no sub-categories left. Categories used by listings can't be deleted (disable instead).
 //   - Adding a name that was deleted before brings that row back (restore) instead of a new one.
+//   - VAT: a main category is VAT applicable (true) or not (false). A sub-category follows its
+//     main category (vatApplicable = null) or overrides it (true / false). "isVatApplicable" in
+//     every response is the final answer.
+//   - Refund policy: main categories only (null = automatic from the seller type).
+//     Sub-categories always follow their main category.
 const path = require('path');
 const fs = require('fs/promises');
 const { Op, fn, col, where: sqlWhere } = require('sequelize');
@@ -24,8 +29,12 @@ const {
   CATEGORY_NAME_MAX,
   CATEGORY_ICON,
   CATEGORY_IMPORT_MAX_ROWS,
+  REFUND_POLICIES,
+  DEFAULT_REFUND_POLICY_BY_SELLER,
 } = require('../config/categories');
-const { iconUrl, ORDER } = require('./category.service');
+const { iconUrl, ORDER, isVatApplicable, vatLabel } = require('./category.service');
+const vatHold = require('./vatHold.service');
+const vatNotify = require('./vatNotify.service');
 
 // Tables that point to a category (used by the "in use" check before delete).
 // Listings count even when the listing itself was deleted (soft delete keeps the row).
@@ -109,9 +118,13 @@ async function listingCounts(ids) {
   return counts;
 }
 
-// Admin shape. "appliesTo" of a sub-category = its main category's value.
-function toAdmin(c, { mainAppliesTo, listings = 0 } = {}) {
-  const value = c.parentId ? mainAppliesTo : c.appliesTo;
+// Admin shape. "appliesTo" and "refundPolicy" of a sub-category = its main category's value.
+//   vatApplicable   -> the stored value (sub-category: null = same as main)
+//   isVatApplicable -> the final yes / no
+function toAdmin(c, { main = null, listings = 0 } = {}) {
+  const owner = c.parentId ? main : c; // the main category
+  const value = owner ? owner.appliesTo : null;
+  const policy = owner ? owner.refundPolicy || null : null;
   return {
     id: c.id,
     parentId: c.parentId,
@@ -120,6 +133,11 @@ function toAdmin(c, { mainAppliesTo, listings = 0 } = {}) {
     slug: c.slug,
     appliesTo: value || null,
     appliesToLabel: value ? APPLIES_TO_LABELS[value] : null,
+    vatApplicable: c.vatApplicable === undefined ? null : c.vatApplicable,
+    isVatApplicable: isVatApplicable(c, main),
+    vatLabel: vatLabel(c, main),
+    refundPolicy: policy,
+    refundPolicyLabel: policy ? REFUND_POLICIES[policy] : 'Automatic (by seller type)',
     description: c.description,
     iconUrl: iconUrl(c.iconPath),
     sortOrder: c.sortOrder,
@@ -130,9 +148,37 @@ function toAdmin(c, { mainAppliesTo, listings = 0 } = {}) {
   };
 }
 
+// ---------- GET /admin/categories/options ----------
+// Dropdown values for the Add / Edit category form
+function options() {
+  const pairs = (obj) => Object.entries(obj).map(([value, label]) => ({ value, label }));
+  return {
+    appliesTo: pairs(APPLIES_TO_LABELS),
+    mainCategoryVat: [
+      { value: true, label: 'VAT applicable' },
+      { value: false, label: 'Not VAT applicable' },
+    ],
+    subCategoryVat: [
+      { value: null, label: 'Same as main category' },
+      { value: true, label: 'VAT applicable' },
+      { value: false, label: 'Not VAT applicable' },
+    ],
+    refundPolicies: [
+      { value: null, label: 'Automatic (by seller type)' },
+      ...pairs(REFUND_POLICIES),
+    ],
+    // What "Automatic" means for each seller type
+    automaticRefundPolicy: Object.entries(DEFAULT_REFUND_POLICY_BY_SELLER).map(([sellerType, value]) => ({
+      sellerType,
+      value,
+      label: REFUND_POLICIES[value],
+    })),
+  };
+}
+
 // ---------- GET /admin/categories/stats ----------
 async function stats() {
-  const rows = await Category.findAll({ attributes: ['id', 'parentId', 'appliesTo', 'isActive'] });
+  const rows = await Category.findAll({ attributes: ['id', 'parentId', 'appliesTo', 'vatApplicable', 'isActive'] });
   const mains = rows.filter((r) => !r.parentId);
   const subs = rows.filter((r) => r.parentId);
   const mainById = new Map(mains.map((m) => [m.id, m]));
@@ -147,16 +193,17 @@ async function stats() {
     mainCategories: mains.length,
     subCategories: subs.filter((s) => mainById.has(s.parentId)).length,
     inactive: rows.filter((r) => !r.isActive).length,
+    vatApplicable: rows.filter((r) => (!r.parentId || mainById.has(r.parentId)) && isVatApplicable(r, mainById.get(r.parentId))).length,
     products: forTab('product'),
     services: forTab('service'),
   };
 }
 
-// ---------- GET /admin/categories?type=&search=&isActive= ----------
+// ---------- GET /admin/categories?type=&search=&isActive=&vat= ----------
 // The tree for one tab: main categories, each with its sub-categories.
 // Search: a matching main category shows all its sub-categories;
 // otherwise only the matching sub-categories are shown under their main category.
-async function list({ type, search, isActive } = {}) {
+async function list({ type, search, isActive, vat } = {}) {
   const mainWhere = { parentId: null };
   if (type) mainWhere.appliesTo = { [Op.in]: [type, 'both'] };
   const mains = await Category.findAll({ where: mainWhere, order: ORDER });
@@ -168,13 +215,15 @@ async function list({ type, search, isActive } = {}) {
 
   const term = search ? search.toLowerCase() : null;
   const matches = (c) => !term || c.name.toLowerCase().includes(term);
-  const statusOk = (c) => typeof isActive !== 'boolean' || c.isActive === isActive;
+  const statusOk = (c, main) =>
+    (typeof isActive !== 'boolean' || c.isActive === isActive) &&
+    (typeof vat !== 'boolean' || isVatApplicable(c, main) === vat);
 
   const items = [];
   mains.forEach((m) => {
     const allSubs = subs.filter((s) => s.parentId === m.id);
     const mainHit = matches(m);
-    const shownSubs = allSubs.filter((s) => statusOk(s) && (mainHit || matches(s)));
+    const shownSubs = allSubs.filter((s) => statusOk(s, m) && (mainHit || matches(s)));
     if (!mainHit && !shownSubs.length) return; // nothing matches the search
     if (!statusOk(m) && !shownSubs.length) return; // status filter
 
@@ -182,7 +231,7 @@ async function list({ type, search, isActive } = {}) {
       ...toAdmin(m, { listings: counts.get(m.id) || 0 }),
       subCategoriesCount: allSubs.length,
       subCategories: shownSubs.map((s) =>
-        toAdmin(s, { mainAppliesTo: m.appliesTo, listings: counts.get(s.id) || 0 })
+        toAdmin(s, { main: m, listings: counts.get(s.id) || 0 })
       ),
     });
   });
@@ -206,13 +255,13 @@ async function getById(id) {
     return {
       ...toAdmin(category),
       subCategoriesCount: subs.length,
-      subCategories: subs.map((s) => toAdmin(s, { mainAppliesTo: category.appliesTo })),
+      subCategories: subs.map((s) => toAdmin(s, { main: category })),
     };
   }
 
   const parent = await Category.findByPk(category.parentId);
   return {
-    ...toAdmin(category, { mainAppliesTo: parent ? parent.appliesTo : null }),
+    ...toAdmin(category, { main: parent }),
     parent: parent ? toAdmin(parent) : null,
   };
 }
@@ -231,15 +280,24 @@ async function loadParent(parentId, transaction) {
   return parent;
 }
 
+// Main categories must be true / false; null ("same as main") only makes sense for a sub-category
+function checkVat(isSub, vatApplicable) {
+  if (!isSub && vatApplicable === null) {
+    throw validationError('vatApplicable', 'For a main category choose true (VAT applicable) or false (no VAT)');
+  }
+}
+
 // ---------- POST /admin/categories ----------
-//   Main category: { name, appliesTo, description?, sortOrder? }
-//   Sub-category:  { name, parentId, description?, sortOrder? }   (appliesTo is ignored)
-async function create({ name, parentId, appliesTo, description, sortOrder }) {
+//   Main category: { name, appliesTo, vatApplicable?, refundPolicy?, description?, sortOrder? }
+//   Sub-category:  { name, parentId, vatApplicable?, description?, sortOrder? }
+//                  (appliesTo and refundPolicy are ignored: they come from the main category)
+async function create({ name, parentId, appliesTo, vatApplicable, refundPolicy, description, sortOrder }) {
   const clean = cleanName(name);
   const isSub = Boolean(parentId);
   if (!isSub && !appliesTo) {
     throw validationError('appliesTo', `Please choose what this main category applies to: ${APPLIES_TO.join(', ')}`);
   }
+  checkVat(isSub, vatApplicable);
 
   return sequelize.transaction(async (transaction) => {
     const parent = isSub ? await loadParent(parentId, transaction) : null;
@@ -252,6 +310,9 @@ async function create({ name, parentId, appliesTo, description, sortOrder }) {
     const values = {
       name: clean,
       appliesTo: isSub ? null : appliesTo,
+      // main: default "no VAT"; sub: default "same as main"
+      vatApplicable: vatApplicable === undefined ? (isSub ? null : false) : vatApplicable,
+      refundPolicy: isSub ? null : refundPolicy || null,
       ...(description !== undefined ? { description: description || null } : {}),
       ...(sortOrder !== undefined ? { sortOrder } : {}),
       isActive: true,
@@ -262,21 +323,21 @@ async function create({ name, parentId, appliesTo, description, sortOrder }) {
     if (deleted) {
       await deleted.restore({ transaction });
       await deleted.update(values, { transaction });
-      return { category: toAdmin(deleted, { mainAppliesTo: parent && parent.appliesTo }), restored: true };
+      return { category: toAdmin(deleted, { main: parent }), restored: true };
     }
 
     const category = await Category.create(
       { ...values, parentId: pid, slug: await slugFor(clean, { transaction }) },
       { transaction }
     );
-    return { category: toAdmin(category, { mainAppliesTo: parent && parent.appliesTo }), restored: false };
+    return { category: toAdmin(category, { main: parent }), restored: false };
   });
 }
 
 // ---------- PUT /admin/categories/:id ----------
-// Any of: name, appliesTo (main only), description, sortOrder
-async function update(id, { name, appliesTo, description, sortOrder }) {
-  return sequelize.transaction(async (transaction) => {
+// Any of: name, appliesTo (main only), vatApplicable, refundPolicy (main only), description, sortOrder
+async function update(id, { name, appliesTo, vatApplicable, refundPolicy, description, sortOrder }) {
+  const { result, holds } = await sequelize.transaction(async (transaction) => {
     const category = await Category.findByPk(id, { transaction });
     if (!category) throw notFound();
     const values = {};
@@ -298,14 +359,56 @@ async function update(id, { name, appliesTo, description, sortOrder }) {
       }
     }
     if (appliesTo !== undefined && !category.parentId) values.appliesTo = appliesTo;
+    if (vatApplicable !== undefined) {
+      checkVat(Boolean(category.parentId), vatApplicable);
+      values.vatApplicable = vatApplicable;
+    }
+    if (refundPolicy !== undefined && !category.parentId) values.refundPolicy = refundPolicy;
     if (description !== undefined) values.description = description || null;
     if (sortOrder !== undefined) values.sortOrder = sortOrder;
 
+    const vatChanged = values.vatApplicable !== undefined && values.vatApplicable !== category.vatApplicable;
     await category.update(values, { transaction });
 
+    // VAT switched on / off: hide or show again the listings of sellers who are not VAT-registered
+    const holds = vatChanged ? await vatHold.forCategory(category.id, { transaction }) : { hidden: [], shown: [] };
+
     const parent = category.parentId ? await Category.findByPk(category.parentId, { transaction }) : null;
-    return toAdmin(category, { mainAppliesTo: parent && parent.appliesTo });
+    return {
+      holds,
+      result: {
+        ...toAdmin(category, { main: parent }),
+        listingsHidden: holds.hidden.length, // live or not: every listing whose hold changed
+        listingsShown: holds.shown.length,
+      },
+    };
   });
+  vatNotify.afterCategoryChange(holds); // emails to the affected sellers, in the background
+  return result;
+}
+
+// ---------- GET /admin/categories/:id/vat-impact?vatApplicable=true|false|null ----------
+// "What happens if I change VAT?" - shown in a confirm box before saving. Nothing is changed.
+async function vatImpact(id, vatApplicable) {
+  const category = await Category.findByPk(id);
+  if (!category) throw notFound();
+  if (!category.parentId && vatApplicable === null) {
+    throw validationError('vatApplicable', 'For a main category choose true (VAT applicable) or false (no VAT)');
+  }
+  const parent = category.parentId ? await Category.findByPk(category.parentId) : null;
+  const preview = await vatHold.previewCategory(category.id, vatApplicable);
+  const after = { id: category.id, parentId: category.parentId, vatApplicable };
+  return {
+    id: category.id,
+    name: category.name,
+    level: category.parentId ? 'sub' : 'main',
+    current: { vatApplicable: category.vatApplicable, isVatApplicable: isVatApplicable(category, parent) },
+    after: { vatApplicable, isVatApplicable: isVatApplicable(after, parent) },
+    ...preview,
+    message: preview.wouldHide
+      ? `${preview.wouldHide} live listing(s) from ${preview.sellersAffected} seller(s) who are not VAT-registered will be hidden from the website.`
+      : 'No live listings will be hidden.',
+  };
 }
 
 // ---------- POST /admin/categories/:id/icon ----------
@@ -339,7 +442,7 @@ async function setIcon(id, file) {
   }
 
   const parent = category.parentId ? await Category.findByPk(category.parentId) : null;
-  return toAdmin(category, { mainAppliesTo: parent && parent.appliesTo });
+  return toAdmin(category, { main: parent });
 }
 
 // ---------- PATCH /admin/categories/:id/status ----------
@@ -591,6 +694,7 @@ async function importCsv(buffer, { dryRun = false } = {}) {
         slug,
         parentId: parent ? parent.id : null,
         appliesTo: parent ? null : appliesTo,
+        vatApplicable: parent ? null : false, // VAT is set from the admin screen, not the CSV
         isActive: true,
       };
       const row = dryRun ? { id: fakeId, ...values } : await Category.create(values, { transaction });
@@ -633,6 +737,8 @@ function importTemplate() {
 }
 
 module.exports = {
+  options,
+  vatImpact,
   stats,
   list,
   getById,

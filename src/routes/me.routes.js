@@ -27,6 +27,13 @@
 //   DELETE /me/wishlist/:listingId                    remove
 //   DELETE /me/wishlist                               remove everything
 //
+// VAT registration (farmer, trader, logistics only; others get 403 NOT_A_SELLER):
+//   GET    /me/vat                                    status, certificate, what to do next
+//   POST   /me/vat                                    "I am VAT-registered" (certificate must be uploaded) -> pending
+//   DELETE /me/vat                                    "I am not VAT-registered" -> none
+// The certificate itself is the KYC document "vat_certificate" (POST /me/documents/vat_certificate).
+// A new certificate sends approved / rejected VAT back to "pending"; deleting it sets "none".
+//
 // KYC documents after registration (documents are optional at registration,
 // so users can upload or replace them any time from their account):
 //   GET    /me/documents                              document cards + status (pending / approved / rejected)
@@ -43,6 +50,7 @@ const documentRules = require('../validators/document.validator');
 const profileRules = require('../validators/profile.validator');
 const paymentRules = require('../validators/paymentMethod.validator');
 const wishlistController = require('../controllers/wishlist.controller');
+const vatController = require('../controllers/vat.controller');
 const addressController = require('../controllers/address.controller');
 const addressRules = require('../validators/address.validator');
 const wishlistRules = require('../validators/wishlist.validator');
@@ -81,6 +89,11 @@ router.get('/wishlist/ids', wishlistController.ids);
 router.post('/wishlist', wishlistRules.add, validate, wishlistController.add);
 router.delete('/wishlist/:listingId', wishlistRules.remove, validate, wishlistController.remove);
 router.delete('/wishlist', wishlistController.clear);
+
+// ---- VAT registration ----
+router.get('/vat', vatController.getMine);
+router.post('/vat', vatController.apply);
+router.delete('/vat', vatController.withdraw);
 
 // ---- KYC documents ----
 router.get('/documents', documentController.list);

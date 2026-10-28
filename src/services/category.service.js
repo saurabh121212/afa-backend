@@ -24,9 +24,23 @@ const ORDER = [
 
 const notFound = (label = 'Category') => new ApiError(404, `${label} not found`, { code: 'CATEGORY_NOT_FOUND' });
 
-// Public shape (no admin-only fields)
-function toPublic(c, appliesTo) {
-  const value = c.parentId ? appliesTo : c.appliesTo;
+// VAT: a sub-category with vatApplicable = null follows its main category.
+// Pass the main category for a sub-category (null / missing main -> treated as "no VAT").
+function isVatApplicable(c, main) {
+  if (c.vatApplicable === true || c.vatApplicable === false) return c.vatApplicable;
+  if (c.parentId && main) return main.vatApplicable === true;
+  return false;
+}
+
+function vatLabel(c, main) {
+  const yes = isVatApplicable(c, main);
+  const text = yes ? 'VAT applicable' : 'Not VAT applicable';
+  return c.parentId && (c.vatApplicable === null || c.vatApplicable === undefined) ? `Same as main category (${text})` : text;
+}
+
+// Public shape (no admin-only fields). For a sub-category pass its main category.
+function toPublic(c, main = null) {
+  const value = c.parentId ? main && main.appliesTo : c.appliesTo;
   return {
     id: c.id,
     parentId: c.parentId,
@@ -34,6 +48,7 @@ function toPublic(c, appliesTo) {
     slug: c.slug,
     appliesTo: value || null,
     appliesToLabel: value ? APPLIES_TO_LABELS[value] : null,
+    isVatApplicable: isVatApplicable(c, main),
     description: c.description,
     iconUrl: iconUrl(c.iconPath),
   };
@@ -60,7 +75,7 @@ async function tree({ type } = {}) {
 
   return mains.map((m) => ({
     ...toPublic(m),
-    subCategories: (subsByParent.get(m.id) || []).map((s) => toPublic(s, m.appliesTo)),
+    subCategories: (subsByParent.get(m.id) || []).map((s) => toPublic(s, m)),
   }));
 }
 
@@ -77,7 +92,7 @@ async function listSubCategories(id) {
   const subs = await Category.findAll({ where: { parentId: main.id, isActive: true }, order: ORDER });
   return {
     category: toPublic(main),
-    items: subs.map((s) => toPublic(s, main.appliesTo)),
+    items: subs.map((s) => toPublic(s, main)),
   };
 }
 
@@ -92,17 +107,17 @@ async function getById(id) {
     return {
       ...toPublic(category),
       level: 'main',
-      subCategories: subs.map((s) => toPublic(s, category.appliesTo)),
+      subCategories: subs.map((s) => toPublic(s, category)),
     };
   }
 
   const parent = await Category.findOne({ where: { id: category.parentId, isActive: true } });
   if (!parent) throw notFound(); // main category is disabled -> sub-category is hidden too
   return {
-    ...toPublic(category, parent.appliesTo),
+    ...toPublic(category, parent),
     level: 'sub',
     parent: toPublic(parent),
   };
 }
 
-module.exports = { tree, listSubCategories, getById, iconUrl, appliesToFilter, ORDER };
+module.exports = { tree, listSubCategories, getById, iconUrl, appliesToFilter, ORDER, isVatApplicable, vatLabel };

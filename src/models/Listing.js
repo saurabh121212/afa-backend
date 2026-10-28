@@ -15,6 +15,10 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         defaultValue: LISTING_STATUS.DRAFT,
       },
+      // Hidden because it is in a VAT category and the seller is not VAT-approved.
+      // Status is not changed, so it shows again automatically once fixed.
+      vatHold: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      vatHoldAt: { type: DataTypes.DATE, allowNull: true },
       categoryId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       subCategoryId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
 
@@ -46,6 +50,9 @@ module.exports = (sequelize, DataTypes) => {
       deliveryDuration: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       deliveryDurationUnit: { type: DataTypes.STRING(20), allowNull: true },
       logisticsBy: { type: DataTypes.STRING(10), allowNull: true },
+      // Delivery fee per region: [{ regionId, fee }]. Region not listed = no delivery there.
+      deliveryFees: { type: DataTypes.JSON, allowNull: true },
+      nonReturnable: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 
       advanceNotice: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       advanceNoticeUnit: { type: DataTypes.STRING(20), allowNull: true },

@@ -132,6 +132,19 @@ const listingFields = [
   number('deliveryDuration', 'Delivery duration', { min: 0, max: 365, int: true }),
   choice('deliveryDurationUnit', 'Delivery duration unit', DURATION_UNITS),
   choice('logisticsBy', 'Manage logistics by', LOGISTICS_BY),
+  // Delivery fee per region (Emalangeni): [{ regionId, fee }]. null / [] = no delivery fees.
+  body('deliveryFees').optional({ values: 'null' }).isArray({ max: 20 }).withMessage('Delivery fees must be a list of { regionId, fee }'),
+  body('deliveryFees.*.regionId').isInt({ min: 1 }).withMessage('Each delivery fee needs a valid regionId').toInt(),
+  body('deliveryFees.*.fee')
+    .exists({ values: 'null' })
+    .withMessage('Each delivery fee needs a fee (0 = free delivery)')
+    .bail()
+    .isFloat({ min: 0, max: 1000000 })
+    .withMessage('Delivery fee must be a number from 0 to 1,000,000')
+    .bail()
+    .customSanitizer((v) => Math.round(parseFloat(v) * 100) / 100),
+  // "Custom order / non-returnable"
+  bool('nonReturnable', 'Custom order / non-returnable'),
   // service booking
   number('advanceNotice', 'Advance booking notice', { min: 0, max: 365, int: true }),
   choice('advanceNoticeUnit', 'Advance booking notice unit', DURATION_UNITS),

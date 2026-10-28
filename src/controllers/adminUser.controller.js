@@ -46,7 +46,10 @@ const viewDocument = asyncHandler(async (req, res, next) => {
 const reviewDocument = asyncHandler(async (req, res) => {
   const { id, documentType, status, reason } = req.validated;
   const data = await service.reviewDocument(id, documentType, { status, reason }, adminId(req));
-  res.json({ success: true, message: `Document ${status}`, data });
+  const message = data.vatStatus
+    ? `Document ${status}. The seller's VAT registration is now ${data.vatStatus}.`
+    : `Document ${status}`;
+  res.json({ success: true, message, data });
 });
 
 // POST /admin/users/:id/approve

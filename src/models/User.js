@@ -1,6 +1,7 @@
 // Sequelize model for the "users" table (all marketplace user types).
 const bcrypt = require('bcryptjs');
 const { USER_TYPES, USER_STATUS } = require('../utils/constants');
+const { VAT_STATUS } = require('../config/vat');
 
 const SALT_ROUNDS = 12;
 
@@ -55,6 +56,16 @@ module.exports = (sequelize, DataTypes) => {
       statusReason: { type: DataTypes.TEXT, allowNull: true }, // admin's message / reason
       statusChangedAt: { type: DataTypes.DATE, allowNull: true },
       statusChangedBy: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true }, // admin id
+      // VAT registration (sellers only; see config/vat.js). The VAT reference is the TIN.
+      vatStatus: {
+        type: DataTypes.ENUM(...Object.values(VAT_STATUS)),
+        allowNull: false,
+        defaultValue: VAT_STATUS.NONE,
+      },
+      vatStatusReason: { type: DataTypes.TEXT, allowNull: true },
+      vatRequestedAt: { type: DataTypes.DATE, allowNull: true },
+      vatReviewedAt: { type: DataTypes.DATE, allowNull: true },
+      vatReviewedBy: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true }, // admin id
       lastLoginAt: { type: DataTypes.DATE, allowNull: true },
       passwordChangedAt: { type: DataTypes.DATE, allowNull: true },
     },
