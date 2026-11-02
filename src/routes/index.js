@@ -50,5 +50,6 @@ router.use('/admin/settings', require('./adminSetting.routes')); // System Setti
 
 router.use('/me/conversations', require('./chat/conversation.routes'));
 router.use('/admin/blogs', require('./adminBlog.routes')); // CMS Blog & Resources
+router.use('/blogs', require('./blog.routes')); // public blog: published posts only
 
 module.exports = router;
