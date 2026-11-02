@@ -19,12 +19,17 @@ router.use('/listings', require('./listing.routes')); // public marketplace (app
 router.use('/sellers', require('./seller.routes')); // public seller pages ("About the Seller", "Visit Store")
 router.use(require('./cms.routes')); // public CMS: GET /banners, GET /faqs, POST /faqs/:id/view
 router.use('/contact', require('./contact.routes')); // public Contact Us form
+router.use('/blogs', require('./blog.routes')); // public blog: published posts only
+router.use('/payments', require('./payment.routes')); // payment gateway callbacks (public)
 
 // ---- SHARED by all user types ----
 router.use('/auth', require('./auth.routes')); // login, forgot/reset password, me
 router.use('/register', require('./registration.routes')); // resume, progress, Step 4 (OTP + submit)
 router.use('/me/listings', require('./myListing.routes')); // seller's own listings (before /me)
 router.use('/me/cart', require('./cart.routes')); // buyer cart (before /me)
+router.use('/me/orders', require('./order.routes')); // buyer checkout + orders (before /me)
+router.use('/me/sales', require('./sales.routes')); // seller orders received (before /me)
+router.use('/me/conversations', require('./chat/conversation.routes')); // chat (your module, before /me)
 router.use('/me', require('./me.routes')); // logged-in user's own account (profile, payments, KYC documents)
 
 // ---- ONE file per user type ----
@@ -43,13 +48,11 @@ router.use('/admin/categories', require('./adminCategory.routes'));
 router.use('/admin/listings', require('./adminListing.routes'));
 router.use('/admin/banners', require('./adminBanner.routes')); // CMS banners
 router.use('/admin/faqs', require('./adminFaq.routes')); // CMS FAQs + FAQ categories
+router.use('/admin/blogs', require('./adminBlog.routes')); // CMS Blog & Resources
 router.use('/admin/contact-messages', require('./adminContact.routes')); // Contact Us inbox
 router.use('/admin/vat-registrations', require('./adminVat.routes')); // sellers' VAT registration review
+router.use('/admin/orders', require('./adminOrder.routes')); // Orders & Transactions
+router.use('/admin/payments', require('./adminPayment.routes')); // bank transfer review queue
 router.use('/admin/settings', require('./adminSetting.routes')); // System Settings (VAT rate, payment time limit...)
-
-
-router.use('/me/conversations', require('./chat/conversation.routes'));
-router.use('/admin/blogs', require('./adminBlog.routes')); // CMS Blog & Resources
-router.use('/blogs', require('./blog.routes')); // public blog: published posts only
 
 module.exports = router;

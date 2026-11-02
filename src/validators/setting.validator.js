@@ -4,6 +4,7 @@ const { body, param } = require('express-validator');
 const { SETTINGS } = require('../config/settings');
 
 const KEYS = Object.keys(SETTINGS);
+// Note: body(key).optional() skips only "missing"; null is accepted for text settings (= clear)
 
 function ruleFor(key) {
   const def = SETTINGS[key];
@@ -15,6 +16,25 @@ function ruleFor(key) {
       .withMessage(`${def.label} must be true or false`)
       .bail()
       .toBoolean(true);
+  }
+
+  if (def.type === 'text') {
+    // "" or null = clear the value
+    let textChain = chain
+      .customSanitizer((v) => (v === null || v === undefined ? '' : v))
+      .isString()
+      .withMessage(`${def.label} must be text`)
+      .bail()
+      .trim()
+      .isLength({ max: def.maxLength })
+      .withMessage(`${def.label} can be at most ${def.maxLength} characters`);
+    if (def.pattern) {
+      textChain = textChain
+        .bail()
+        .custom((v) => v === '' || new RegExp(def.pattern).test(v))
+        .withMessage(def.patternMessage || `${def.label} is not valid`);
+    }
+    return textChain;
   }
 
   // number

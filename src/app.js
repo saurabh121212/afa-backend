@@ -12,6 +12,11 @@ const { notFound, errorHandler } = require('./middlewares/errorHandler');
 
 const app = express();
 
+// Behind nginx / a load balancer: use the real client IP (TRUST_PROXY=1)
+if (config.trustProxy) {
+  app.set('trust proxy', /^\d+$/.test(config.trustProxy) ? Number(config.trustProxy) : config.trustProxy);
+}
+
 // Security headers
 app.use(helmet());
 

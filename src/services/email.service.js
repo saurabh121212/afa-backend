@@ -350,7 +350,56 @@ async function sendVatRequestAdminEmail({ to, sellerName, userType, tin, newCert
   });
 }
 
+// ---------- Orders & payments ----------
+// One flexible template for every order email.
+//   lines   -> paragraphs (plain text, escaped)
+//   items   -> [{ name, quantity, unitLabel, lineTotalLabel }]
+//   totals  -> [[label, value], ...]  e.g. [['Total', 'E 837.50']]
+//   box     -> { title, text } highlighted block (reason, bank details...)
+function itemsTableHtml(items = []) {
+  if (!items.length) return '';
+  const rows = items
+    .map(
+      (i) => `<tr><td style="padding:4px 0;">${escapeHtml(i.name)} &times; ${escapeHtml(String(i.quantity))} ${escapeHtml(i.unitLabel || '')}</td>
+              <td style="padding:4px 0; text-align:right;">${escapeHtml(i.lineTotalLabel || '')}</td></tr>`
+    )
+    .join('');
+  return `<table style="width:100%; border-collapse:collapse; margin:8px 0;">${rows}</table>`;
+}
+function totalsHtml(totals = []) {
+  if (!totals.length) return '';
+  const rows = totals
+    .map(([label, value], idx) => {
+      const strong = idx === totals.length - 1 ? 'font-weight:bold;' : '';
+      return `<tr><td style="padding:2px 0; ${strong}">${escapeHtml(label)}</td><td style="padding:2px 0; text-align:right; ${strong}">${escapeHtml(value)}</td></tr>`;
+    })
+    .join('');
+  return `<table style="width:100%; border-top:1px solid #E8F5E9; margin-top:8px;">${rows}</table>`;
+}
+
+async function sendOrderEmail({ to, name, userType, subject, title, lines = [], items = [], totals = [], box = null }) {
+  const html = layout(
+    title,
+    `${name !== undefined ? `<p>Hello ${escapeHtml(name || '')},</p>` : ''}
+     ${userType ? accountLine(userType) : ''}
+     ${lines.map((l) => `<p>${escapeHtml(l)}</p>`).join('')}
+     ${box ? reasonBlock(escapeHtml(box.title), box.text) : ''}
+     ${itemsTableHtml(items)}
+     ${totalsHtml(totals)}`
+  );
+  const text = [
+    ...lines,
+    box ? `${box.title}: ${box.text}` : '',
+    ...items.map((i) => `- ${i.name} x ${i.quantity} ${i.unitLabel || ''}: ${i.lineTotalLabel || ''}`),
+    ...totals.map(([l, v]) => `${l}: ${v}`),
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return send({ to, subject, html, text });
+}
+
 module.exports = {
+  sendOrderEmail,
   sendVatStatusEmail,
   sendVatListingsEmail,
   sendVatRequestAdminEmail,

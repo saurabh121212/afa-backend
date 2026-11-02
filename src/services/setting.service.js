@@ -15,6 +15,7 @@ let cache = null; // { key: value } for every setting
 function clean(key, value) {
   const def = SETTINGS[key];
   if (def.type === 'boolean') return typeof value === 'boolean' ? value : def.default;
+  if (def.type === 'text') return typeof value === 'string' ? value : def.default;
   const n = Number(value);
   if (value === null || value === '' || !Number.isFinite(n) || n < def.min || n > def.max) return def.default;
   return n;
@@ -46,6 +47,7 @@ function clearCache() {
 
 const valueLabel = (def, value) => {
   if (def.type === 'boolean') return value ? 'Yes' : 'No';
+  if (def.type === 'text') return value || 'Not set';
   return def.unit === '%' ? `${value}%` : `${value} ${def.unit || ''}`.trim();
 };
 
@@ -62,6 +64,7 @@ function shape(key, value, row) {
     default: def.default,
     isDefault: value === def.default,
     ...(def.type === 'number' ? { min: def.min, max: def.max, decimals: def.decimals, unit: def.unit || null } : {}),
+    ...(def.type === 'text' ? { maxLength: def.maxLength } : {}),
     updatedAt: row ? row.updatedAt : null,
     updatedBy: row && row.updatedByAdmin ? { id: row.updatedByAdmin.id, name: row.updatedByAdmin.name } : null,
   };
