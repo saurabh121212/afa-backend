@@ -420,6 +420,19 @@ async function buildValues(user, kind, data, rawBody, current = null) {
     if (values.nonReturnable === null) delete values.nonReturnable;
   }
 
+  // Products: stock and minimum order use the SAME unit as the price (e.g. all "kg"),
+  // so the cart can check stock. Checked when any of the three units changes.
+  if (kind === 'product' && ['priceUnit', 'quantityUnit', 'minOrderUnit'].some((f) => values[f] !== undefined)) {
+    const priceUnit = pick('priceUnit');
+    const unitErrors = [
+      ['quantityUnit', 'Quantity available'],
+      ['minOrderUnit', 'Minimum order'],
+    ]
+      .filter(([f]) => priceUnit && pick(f) && pick(f) !== priceUnit)
+      .map(([f, label]) => ({ field: f, message: `${label} must use the same unit as the price (${PRODUCT_UNITS[priceUnit] || priceUnit})` }));
+    if (unitErrors.length) throw validationError(unitErrors);
+  }
+
   // Pre-order: keep the date only for pre-orders
   if (kind === 'product' && values.availability && values.availability !== 'pre_order') values.availableFrom = null;
 
