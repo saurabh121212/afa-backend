@@ -21,11 +21,17 @@
 //                                                             Confirmed / Packed -> request to the seller
 //   DELETE /me/orders/:id/seller-orders/:sellerOrderId/cancel-request  withdraw the request
 //   GET    /me/orders/:id/seller-orders/:sellerOrderId/claim-options   what can be claimed (then POST /me/claims)
+//
+// Invoices & payment status:
+//   GET    /me/orders/:id/payment-status                     current payment step, what to do next, poll interval
+//   GET    /me/orders/:id/proforma                           proforma invoice PDF (before payment; ?download=true)
 const express = require('express');
 const controller = require('../controllers/order.controller');
 const cancellation = require('../controllers/cancellation.controller');
 const claim = require('../controllers/claim.controller').buyer;
 const refundRules = require('../validators/refund.validator');
+const invoiceController = require('../controllers/invoice.controller');
+const invoiceRules = require('../validators/invoice.validator');
 const rules = require('../validators/order.validator');
 const validate = require('../middlewares/validate');
 const validateUpload = require('../middlewares/validateUpload');
@@ -39,6 +45,8 @@ router.get('/payment-methods', controller.paymentMethods);
 router.post('/', requireApprovedAccount, rules.placeOrder, validate, controller.placeOrder);
 router.get('/', rules.myList, validate, controller.list);
 router.get('/:id', rules.byId, validate, controller.getOne);
+router.get('/:id/payment-status', invoiceRules.orderById, validate, invoiceController.paymentStatus);
+router.get('/:id/proforma', invoiceRules.orderById, validate, invoiceController.proforma);
 router.patch('/:id/payment-method', rules.paymentMethod, validate, controller.changeMethod);
 router.post('/:id/pay/online', rules.payOnline, validate, controller.payOnline);
 router.post('/:id/pay/test', rules.testPay, validate, controller.payTest);

@@ -119,6 +119,60 @@ const SETTINGS = {
     unit: 'days',
   },
 
+  // AFA's own details, printed on invoices, receipts, credit notes and proforma invoices
+  afa_company_name: {
+    label: 'Company Name',
+    description: 'Printed at the top of every invoice, receipt and credit note',
+    group: 'company',
+    type: 'text',
+    default: 'Agricultural e-Marketplace for Eswatini (AFA)',
+    maxLength: 150,
+  },
+  afa_company_address: {
+    label: 'Address',
+    description: 'Postal / physical address (use a comma or a new line between parts)',
+    group: 'company',
+    type: 'text',
+    default: '',
+    maxLength: 300,
+  },
+  afa_company_tin: {
+    label: 'TIN',
+    description: "AFA's Tax Identification Number",
+    group: 'company',
+    type: 'text',
+    default: '',
+    maxLength: 30,
+    pattern: '^[0-9A-Za-z/-]{3,30}$',
+    patternMessage: 'TIN must be 3-30 letters, digits, / or -',
+  },
+  afa_company_phone: {
+    label: 'Phone',
+    description: 'e.g. +268 2404 0000',
+    group: 'company',
+    type: 'text',
+    default: '',
+    maxLength: 30,
+  },
+  afa_company_email: {
+    label: 'Email',
+    description: 'Support / accounts email shown on documents',
+    group: 'company',
+    type: 'text',
+    default: '',
+    maxLength: 120,
+    pattern: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$',
+    patternMessage: 'Enter a valid email address',
+  },
+  invoice_footer: {
+    label: 'Invoice Footer',
+    description: 'Short note printed at the bottom of every document',
+    group: 'company',
+    type: 'text',
+    default: 'Thank you for trading on AFA. Questions about this document? Contact the AFA team.',
+    maxLength: 300,
+  },
+
   // AFA bank account shown to buyers who pay by bank transfer. Empty account number = bank transfer is not offered.
   afa_bank_name: {
     label: 'Bank Name',
@@ -172,6 +226,7 @@ const SETTING_GROUPS = {
   tax: 'Tax / VAT',
   orders: 'Orders & Payments',
   refunds: 'Cancellations, Claims & Refunds',
+  company: 'Company Details (Invoices)',
   bank: 'AFA Bank Account (Bank Transfer)',
 };
 

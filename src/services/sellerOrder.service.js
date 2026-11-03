@@ -28,6 +28,7 @@ const {
 const { sequelize, Order, SellerOrder, OrderItem, OrderStatusHistory, User } = models;
 const cancellations = require('./cancellation.service');
 const claims = require('./claim.service');
+const invoices = require('./invoice.service');
 const { num, money, addHours, recordHistory, sellerOrderShape, isLate } = shared;
 const SO = SELLER_ORDER_STATUS;
 const orderNotify = require('./orderNotify.service');
@@ -183,16 +184,19 @@ async function findOwn(seller, id, { transaction, lock = false } = {}) {
 // GET /me/sales/:id   (+ cancellation requests and claims of this order)
 async function getOne(seller, id) {
   const so = await findOwn(seller, id);
-  const [shaped, requests, claimRows] = await Promise.all([
+  const [shaped, requests, claimRows, documents] = await Promise.all([
     shapeForSeller([so], { withHistory: true }),
     cancellations.requestsFor([so.id]),
     claims.claimsFor({ type: 'seller', id: seller.id }, [so.id]),
+    invoices.documentsFor({ type: 'seller', id: seller.id }, so.orderId, { sellerOrderIds: [so.id] }),
   ]);
   return {
     ...shaped[0],
     cancelRequest: requests.find((r) => r.id === so.openCancelRequestId) || null,
     cancelRequests: requests,
     claims: claimRows,
+    invoice: documents.invoices[0] || null,
+    creditNotes: documents.creditNotes,
   };
 }
 

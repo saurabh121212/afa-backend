@@ -9,13 +9,15 @@
 //
 // The buyer gives the bank account when a refund is due (and can save it for next time).
 // The seller's payout goes down by the refund. If the seller was already paid (refund after
-// completion) the refund is flagged "recover from seller".
+// completion) the refund is flagged "recover from seller". A credit note is issued against the
+// seller order's invoice.
 const { Op } = require('sequelize');
 const models = require('../models');
 const ApiError = require('../utils/ApiError');
 const settings = require('./setting.service');
 const directory = require('./userDirectory');
 const files = require('./privateFiles');
+const invoices = require('./invoice.service');
 const { toCsvLine } = require('../utils/csv');
 const { getPagination, paginationMeta } = require('../utils/pagination');
 const { round2, num, money, addHours, recordHistory } = require('./orderShared');
@@ -105,6 +107,9 @@ async function createRefund({ order, sellerOrder = null, source, reason = null, 
     }
     await sellerOrder.update(values, { transaction });
   }
+
+  // Credit note against the seller order's invoice
+  await invoices.issueCreditNote(refund, transaction);
 
   await recordHistory(
     {

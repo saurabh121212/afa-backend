@@ -15,6 +15,7 @@ const orderNotify = require('./orderNotify.service');
 const cancellations = require('./cancellation.service');
 const claims = require('./claim.service');
 const { refundShape } = require('./refund.service');
+const invoices = require('./invoice.service');
 
 const { sequelize, Order, SellerOrder } = models;
 const { num, money, totalsShape, sellerOrderShape, paymentShape, sortedPayments, timeline, fullIncludes, loadOrder, orderNotFound } = shared;
@@ -84,12 +85,21 @@ async function getMine(user, id) {
   if (!order) throw orderNotFound();
   const shaped = (await shapeMany([order]))[0];
   const soIds = shaped.sellerOrders.map((so) => so.id);
-  const [requests, claimRows] = await Promise.all([cancellations.requestsFor(soIds), claims.claimsFor({ type: 'buyer', id: user.id }, soIds)]);
+  const [requests, claimRows, documents] = await Promise.all([
+    cancellations.requestsFor(soIds),
+    claims.claimsFor({ type: 'buyer', id: user.id }, soIds),
+    invoices.documentsFor({ type: 'buyer', id: user.id }, order.id),
+  ]);
   shaped.sellerOrders = shaped.sellerOrders.map((so) => ({
     ...so,
     cancelRequest: requests.find((r) => r.sellerOrder.id === so.id && r.id === so.openCancelRequestId) || requests.find((r) => r.sellerOrder.id === so.id) || null,
     claims: claimRows.filter((c) => c.sellerOrder.id === so.id),
+    invoice: documents.invoices.find((d) => d.sellerOrderId === so.id) || null,
+    creditNotes: documents.creditNotes.filter((d) => d.sellerOrderId === so.id),
   }));
+  // Invoices, receipt, credit notes (paid orders); proforma (before payment)
+  shaped.documents = { ...documents, proformaUrl: [S.AWAITING_PAYMENT, S.UNDER_REVIEW].includes(order.status) ? `/me/orders/${order.id}/proforma` : null };
+  shaped.paymentStatusUrl = `/me/orders/${order.id}/payment-status`;
   return shaped;
 }
 

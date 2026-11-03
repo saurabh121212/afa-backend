@@ -3,7 +3,7 @@
 //
 //   orderPlaced              -> buyer: order placed + how to pay (bank details / online)
 //   proofUploaded            -> admin: a bank transfer proof to check
-//   orderPaid                -> buyer: payment received; each seller: new order
+//   orderPaid                -> buyer: payment received (+ receipt PDF); each seller: new order (+ invoice PDF)
 //   paymentRejected          -> buyer: proof rejected + reason + new deadline
 //   onlinePaymentFailed      -> buyer: online payment failed, try again
 //   paidAfterCancel          -> admin: money received for a cancelled order (refund needed)
@@ -13,10 +13,22 @@ const models = require('../models');
 const emailService = require('./email.service');
 const directory = require('./userDirectory');
 const settings = require('./setting.service');
+const invoices = require('./invoice.service');
 const { num, money, itemShape } = require('./orderShared');
 const { ORDER_STATUS, SELLER_ORDER_STATUS_LABELS } = require('../config/orders');
 
-const { Order, SellerOrder, OrderItem, OrderStatusHistory, Payment, User, Admin } = models;
+const { Order, SellerOrder, OrderItem, OrderStatusHistory, Payment, User, Admin, Invoice } = models;
+
+// PDF of a stored document as an email attachment ([] when missing or on error: the email still goes)
+async function attach(where) {
+  try {
+    const doc = await Invoice.findOne({ where });
+    return doc ? [await invoices.pdfFor(doc)] : [];
+  } catch (err) {
+    console.error('Invoice PDF for email failed:', err.message);
+    return [];
+  }
+}
 
 const background = (label, fn) =>
   Promise.resolve()
@@ -103,9 +115,13 @@ function orderPaid(orderId) {
       userType: buyer.userType,
       subject: `Payment received for ${order.orderNumber}`,
       title: 'Payment received',
-      lines: [`We have received your payment of ${money(order.total)}. The seller(s) will now prepare your order.`],
+      lines: [
+        `We have received your payment of ${money(order.total)}. The seller(s) will now prepare your order.`,
+        'Your receipt is attached. Each seller\'s invoice is in the app (My Orders > order details).',
+      ],
       items: itemsOf(order.sellerOrders),
       totals: orderTotals(order),
+      attachments: await attach({ orderId: order.id, type: 'receipt' }),
     });
 
     // Each seller: their part of the order
@@ -117,7 +133,7 @@ function orderPaid(orderId) {
         const seller = sellerById.get(so.sellerId);
         if (!seller) return null;
         const items = (so.items || []).map(itemShape);
-        return background(`new order seller ${so.sellerId}`, () =>
+        return background(`new order seller ${so.sellerId}`, async () =>
           emailService.sendOrderEmail({
             to: seller.email,
             name: dirs.get(so.sellerId) ? dirs.get(so.sellerId).display_name : '',
@@ -127,6 +143,7 @@ function orderPaid(orderId) {
             lines: [
               `${buyerName} ordered from you (${so.fulfilment === 'pickup' ? 'Pickup' : 'Delivery'}). The payment is received and held by AFA.`,
               `Please confirm the order before ${fmtDate(so.confirmBy)} in your AFA account (My Sales).`,
+              'The invoice issued in your name is attached.',
             ],
             box: so.buyerNote ? { title: 'Note from the buyer', text: so.buyerNote } : null,
             items,
@@ -136,6 +153,7 @@ function orderPaid(orderId) {
               ['VAT', money(so.vatTotal)],
               ['Total', money(so.total)],
             ],
+            attachments: await attach({ sellerOrderId: so.id, type: 'invoice' }),
           })
         );
       })

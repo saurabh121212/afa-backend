@@ -51,8 +51,9 @@ function layout(title, bodyHtml) {
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-async function send({ to, subject, html, text }) {
-  return transporter.sendMail({ from: mail.from, to, subject, html, text });
+// attachments (optional): [{ filename, content: Buffer, contentType }]
+async function send({ to, subject, html, text, attachments }) {
+  return transporter.sendMail({ from: mail.from, to, subject, html, text, ...(attachments && attachments.length ? { attachments } : {}) });
 }
 
 async function sendOtpEmail({ to, name, otp, purpose, userType, expiresInMinutes }) {
@@ -377,7 +378,7 @@ function totalsHtml(totals = []) {
   return `<table style="width:100%; border-top:1px solid #E8F5E9; margin-top:8px;">${rows}</table>`;
 }
 
-async function sendOrderEmail({ to, name, userType, subject, title, lines = [], items = [], totals = [], box = null }) {
+async function sendOrderEmail({ to, name, userType, subject, title, lines = [], items = [], totals = [], box = null, attachments = [] }) {
   const html = layout(
     title,
     `${name !== undefined ? `<p>Hello ${escapeHtml(name || '')},</p>` : ''}
@@ -395,7 +396,7 @@ async function sendOrderEmail({ to, name, userType, subject, title, lines = [], 
   ]
     .filter(Boolean)
     .join('\n');
-  return send({ to, subject, html, text });
+  return send({ to, subject, html, text, attachments });
 }
 
 module.exports = {

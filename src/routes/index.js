@@ -31,6 +31,8 @@ router.use('/me/orders', require('./order.routes')); // buyer checkout + orders 
 router.use('/me/sales', require('./sales.routes')); // seller orders received + claims (before /me)
 router.use('/me/claims', require('./claim.routes')); // buyer claims: problems after delivery (before /me)
 router.use('/me/refunds', require('./refund.routes')); // buyer refunds + refund bank account (before /me)
+router.use('/me/invoices', require('./invoice.routes')); // invoices, receipts, credit notes (before /me)
+router.use('/me/transactions', require('./transaction.routes')); // transaction history (before /me)
 router.use('/me/conversations', require('./chat/conversation.routes')); // chat (your module, before /me)
 router.use('/me', require('./me.routes')); // logged-in user's own account (profile, payments, KYC documents)
 
@@ -57,6 +59,8 @@ router.use('/admin/orders', require('./adminOrder.routes')); // Orders & Transac
 router.use('/admin/payments', require('./adminPayment.routes')); // bank transfer review queue
 router.use('/admin/claims', require('./adminClaim.routes')); // claims: decide escalated problems
 router.use('/admin/refunds', require('./adminRefund.routes')); // refunds to pay
+router.use('/admin/invoices', require('./adminInvoice.routes')); // invoices, receipts, credit notes
+router.use('/admin/transactions', require('./adminTransaction.routes')); // all money in / out
 router.use('/admin/settings', require('./adminSetting.routes')); // System Settings (VAT rate, payment time limit...)
 
 module.exports = router;

@@ -34,6 +34,7 @@ const S = ORDER_STATUS;
 const orderNotify = require('./orderNotify.service');
 const refundNotify = require('./refundNotify.service');
 const refunds = require('./refund.service');
+const invoices = require('./invoice.service');
 
 // ---------- files ----------
 const uploadRoot = () => path.resolve(config.upload.dir);
@@ -46,7 +47,8 @@ function absolutePath(relativePath) {
 
 // ---------- the two big state changes (always inside a transaction) ----------
 
-// Payment received in full -> order Paid, every seller order Paid ("New order" for the seller)
+// Payment received in full -> order Paid, every seller order Paid ("New order" for the seller),
+// one invoice per seller order + a receipt are issued
 async function markPaid(order, actor, transaction, note = null) {
   const now = new Date();
   const confirmHours = await settings.get('seller_confirm_hours');
@@ -67,6 +69,7 @@ async function markPaid(order, actor, transaction, note = null) {
       transaction
     );
   }
+  await invoices.issueForPaidOrder(order, transaction);
 }
 
 // Not paid (or cancelled by the buyer before paying): cancel everything and put the stock back

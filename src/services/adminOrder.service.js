@@ -13,6 +13,7 @@ const { sequelize, Order, SellerOrder, Payment, User, CancellationRequest, Claim
 const cancellations = require('./cancellation.service');
 const claims = require('./claim.service');
 const refunds = require('./refund.service');
+const invoices = require('./invoice.service');
 const { num, money, round2, totalsShape, sellerOrderShape, paymentShape, sortedPayments, timeline, fullIncludes, loadOrder, orderNotFound, isLate } = shared;
 
 // ---------- orders ----------
@@ -146,10 +147,11 @@ async function getById(id) {
   if (!order) throw orderNotFound();
   const shaped = (await shapeMany([order], { full: true }))[0];
   const soIds = shaped.sellerOrders.map((so) => so.id);
-  const [requests, claimRows, refundRows] = await Promise.all([
+  const [requests, claimRows, refundRows, documents] = await Promise.all([
     cancellations.requestsFor(soIds),
     claims.claimsFor({ type: 'admin' }, soIds),
     refunds.shapeMany((order.refunds || []).slice().sort((a, b) => b.id - a.id), { view: 'admin' }),
+    invoices.documentsFor({ type: 'admin' }, order.id),
   ]);
   shaped.sellerOrders = shaped.sellerOrders.map((so) => ({
     ...so,
@@ -162,6 +164,7 @@ async function getById(id) {
     },
   }));
   shaped.refunds = refundRows;
+  shaped.documents = documents;
   shaped.refundedTotal = shared.round2(refundRows.reduce((s, r) => s + r.amount, 0));
   return shaped;
 }
