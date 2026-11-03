@@ -7,7 +7,7 @@
 //   maxLength / pattern -> rules for text (an empty text = not set)
 //   min / max -> allowed range for numbers
 //   decimals  -> most decimal places allowed (0 = whole numbers only)
-//   unit      -> shown next to the field (%, minutes)
+//   unit      -> shown next to the field (%, minutes, hours, days)
 
 const SETTINGS = {
   vat_rate: {
@@ -62,6 +62,63 @@ const SETTINGS = {
     unit: 'hours',
   },
 
+  // Cancellations, claims and refunds (Phase 4)
+  seller_auto_cancel_hours: {
+    label: 'Auto-cancel Unconfirmed Orders (hours)',
+    description: 'A paid order the seller has not confirmed within this time (from payment) is cancelled automatically and the buyer gets a full refund',
+    group: 'refunds',
+    type: 'number',
+    default: 48,
+    min: 2,
+    max: 336,
+    decimals: 0,
+    unit: 'hours',
+  },
+  cancel_request_response_hours: {
+    label: 'Seller Time to Answer a Cancellation Request (hours)',
+    description: 'If the seller does not accept or decline a buyer\'s cancellation request in this time, it goes to the AFA team',
+    group: 'refunds',
+    type: 'number',
+    default: 24,
+    min: 1,
+    max: 168,
+    decimals: 0,
+    unit: 'hours',
+  },
+  claim_response_hours: {
+    label: 'Seller Time to Reply to a Claim (hours)',
+    description: 'If the seller does not reply to a claim (or confirm a returned item) in this time, it goes to the AFA team',
+    group: 'refunds',
+    type: 'number',
+    default: 48,
+    min: 1,
+    max: 336,
+    decimals: 0,
+    unit: 'hours',
+  },
+  claim_escalate_hours: {
+    label: 'Buyer Time to Escalate a Rejected Claim (hours)',
+    description: 'After the seller rejects a claim, the buyer can send it to the AFA team within this time. After it the claim is closed',
+    group: 'refunds',
+    type: 'number',
+    default: 48,
+    min: 1,
+    max: 336,
+    decimals: 0,
+    unit: 'hours',
+  },
+  refund_processing_days: {
+    label: 'Refund Processing Time (days)',
+    description: 'Target time for the AFA team to pay a refund. Refunds past it are shown as overdue',
+    group: 'refunds',
+    type: 'number',
+    default: 7,
+    min: 1,
+    max: 60,
+    decimals: 0,
+    unit: 'days',
+  },
+
   // AFA bank account shown to buyers who pay by bank transfer. Empty account number = bank transfer is not offered.
   afa_bank_name: {
     label: 'Bank Name',
@@ -111,6 +168,11 @@ const SETTINGS = {
   },
 };
 
-const SETTING_GROUPS = { tax: 'Tax / VAT', orders: 'Orders & Payments', bank: 'AFA Bank Account (Bank Transfer)' };
+const SETTING_GROUPS = {
+  tax: 'Tax / VAT',
+  orders: 'Orders & Payments',
+  refunds: 'Cancellations, Claims & Refunds',
+  bank: 'AFA Bank Account (Bank Transfer)',
+};
 
 module.exports = { SETTINGS, SETTING_GROUPS };

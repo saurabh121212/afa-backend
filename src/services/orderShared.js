@@ -1,6 +1,6 @@
 // Shared pieces for checkout, payments and the buyer / seller / admin order screens:
 // loading an order, the API "shapes", the timeline and small helpers.
-const { Order, SellerOrder, OrderItem, OrderStatusHistory, Payment } = require('../models');
+const { Order, SellerOrder, OrderItem, OrderStatusHistory, Payment, Refund } = require('../models');
 const ApiError = require('../utils/ApiError');
 const { CURRENCY } = require('../config/listingOptions');
 const {
@@ -13,6 +13,7 @@ const {
   PAYMENT_STATUS_LABELS,
   PAYOUT_STATUS_LABELS,
 } = require('../config/orders');
+const { BUYER_DIRECT_CANCEL, BUYER_REQUEST_CANCEL, SELLER_CANCEL, CANCELLED_BY_LABELS } = require('../config/refunds');
 
 // ---------- numbers ----------
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -38,6 +39,19 @@ const HISTORY_LABELS = {
   payment_rejected: 'Payment Rejected',
   payment_failed: 'Online Payment Failed',
   payment_method_changed: 'Payment Method Changed',
+  payment_after_cancel: 'Payment Received After Cancellation',
+  // Phase 4
+  cancel_requested: 'Cancellation Requested',
+  cancel_request_withdrawn: 'Cancellation Request Withdrawn',
+  cancel_request_declined: 'Cancellation Request Declined',
+  cancel_request_escalated: 'Cancellation Request Sent to AFA',
+  cancel_request_rejected: 'Cancellation Request Rejected by AFA',
+  claim_opened: 'Problem Reported (Claim)',
+  claim_resolved: 'Claim Resolved',
+  claim_closed: 'Claim Closed',
+  refund_created: 'Refund Due',
+  refund_paid: 'Refund Paid',
+  refund_failed: 'Refund Failed',
 };
 
 function timeline(history = [], sellerOrderId = null) {
@@ -60,6 +74,7 @@ const fullIncludes = () => [
   { model: SellerOrder, as: 'sellerOrders', include: [{ model: OrderItem, as: 'items' }] },
   { model: Payment, as: 'payments' },
   { model: OrderStatusHistory, as: 'history' },
+  { model: Refund, as: 'refunds' },
 ];
 
 async function loadOrder(where, { transaction, lock = false } = {}) {
@@ -116,8 +131,8 @@ function itemShape(i) {
 const isLate = (so) =>
   so.status === SELLER_ORDER_STATUS.PAID && so.confirmBy && new Date(so.confirmBy) < new Date();
 
-// Next statuses the seller can choose
-const sellerNextStatuses = (so) => ((SELLER_TRANSITIONS[so.status] || {})[so.fulfilment] || []).map((s) => ({
+// Next statuses the seller can choose (none while the buyer's cancellation request waits for an answer)
+const sellerNextStatuses = (so) => (so.openCancelRequestId ? [] : (SELLER_TRANSITIONS[so.status] || {})[so.fulfilment] || []).map((s) => ({
   status: s,
   label: SELLER_ORDER_STATUS_LABELS[s],
 }));
@@ -155,10 +170,37 @@ function sellerOrderShape(so, { view = 'buyer', seller = null, history = [] } = 
       completedAt: so.completedAt,
       cancelledAt: so.cancelledAt,
     },
+    // Phase 4: cancellation, claim, refunds
+    cancellation:
+      so.status === SELLER_ORDER_STATUS.CANCELLED
+        ? { reason: so.cancelReason || null, by: so.cancelledBy || null, byLabel: CANCELLED_BY_LABELS[so.cancelledBy] || null, at: so.cancelledAt }
+        : null,
+    hasOpenCancelRequest: Boolean(so.openCancelRequestId),
+    openCancelRequestId: so.openCancelRequestId || null,
+    claimStatus: so.claimStatus || 'none',
+    activeClaimId: so.activeClaimId || null,
+    claimWindowEndsAt: [SELLER_ORDER_STATUS.DELIVERED, SELLER_ORDER_STATUS.COLLECTED].includes(so.status) ? so.completeAfter : null,
+    refundedAmount: num(so.refundedAmount || 0),
+    refundedLabel: money(so.refundedAmount || 0),
     timeline: timeline(history, so.id),
   };
   if (view === 'buyer') {
+    const inWindow = [SELLER_ORDER_STATUS.DELIVERED, SELLER_ORDER_STATUS.COLLECTED].includes(so.status) && so.completeAfter && new Date(so.completeAfter) > new Date();
     base.canConfirmReceived = [SELLER_ORDER_STATUS.DISPATCHED, SELLER_ORDER_STATUS.READY_FOR_PICKUP].includes(so.status);
+    base.actions = {
+      canConfirmReceived: base.canConfirmReceived,
+      // "New Order": cancelled at once. Confirmed / Packed: a request to the seller.
+      canCancel: BUYER_DIRECT_CANCEL.includes(so.status),
+      canRequestCancel: BUYER_REQUEST_CANCEL.includes(so.status) && !so.openCancelRequestId,
+      canWithdrawCancelRequest: Boolean(so.openCancelRequestId),
+      canReportProblem: Boolean(inWindow) && (so.claimStatus || 'none') === 'none',
+    };
+  }
+  if (view === 'seller') {
+    base.actions = {
+      canCancel: SELLER_CANCEL.includes(so.status),
+      canAnswerCancelRequest: Boolean(so.openCancelRequestId),
+    };
   }
   if (view === 'seller' || view === 'admin') {
     base.confirmBy = so.confirmBy;

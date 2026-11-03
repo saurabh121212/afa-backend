@@ -12,6 +12,7 @@
 //   Test mode: POST /me/orders/:id/pay/test { outcome } plays the gateway's part.
 //
 // UNPAID by the deadline -> cancelled by the background job, stock goes back.
+// PAID AFTER CANCELLATION (online money arrives late) -> a refund is created for the admin to pay.
 const path = require('path');
 const fs = require('fs/promises');
 const { Op } = require('sequelize');
@@ -31,6 +32,8 @@ const S = ORDER_STATUS;
 
 // Emails are sent after the change is saved, in the background
 const orderNotify = require('./orderNotify.service');
+const refundNotify = require('./refundNotify.service');
+const refunds = require('./refund.service');
 
 // ---------- files ----------
 const uploadRoot = () => path.resolve(config.upload.dir);
@@ -214,17 +217,32 @@ async function applyGatewayResult({ provider, providerReference, status, amount,
       await markPaid(order, { type: 'system' }, transaction, 'Paid online');
       return { payment, order, result: 'paid' };
     }
-    // Money arrived after the order was cancelled: keep it cancelled, the admin must refund
+    // Money arrived after the order was cancelled: keep it cancelled and refund the buyer
     await recordHistory(
       { orderId: order.id, to: 'payment_after_cancel', actor: { type: 'system' }, note: 'Online payment received after the order was cancelled - refund needed' },
       transaction
     );
-    return { payment, order, result: 'paid_after_cancel' };
+    const refund = await refunds.createRefund(
+      {
+        order,
+        source: 'paid_after_cancel',
+        reason: 'Online payment received after the order was cancelled',
+        breakdown: {
+          amount: round2(payment.amount),
+          itemsAmount: round2(order.subtotal),
+          deliveryAmount: round2(order.deliveryTotal),
+          vatAmount: round2(order.vatTotal),
+        },
+        actor: { type: 'system' },
+      },
+      transaction
+    );
+    return { payment, order, result: 'paid_after_cancel', refundId: refund.id };
   });
 
   if (out.result === 'paid') orderNotify.orderPaid(out.order.id);
   if (out.result === 'failed') orderNotify.onlinePaymentFailed(out.order.id);
-  if (out.result === 'paid_after_cancel') orderNotify.paidAfterCancel(out.order.id);
+  if (out.result === 'paid_after_cancel') refundNotify.refundCreated(out.refundId);
   const order = out.order || (await Order.findByPk(out.payment.orderId, { attributes: ['id', 'orderNumber', 'status'] }));
   return {
     status: out.payment.status,

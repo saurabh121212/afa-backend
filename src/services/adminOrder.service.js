@@ -9,7 +9,10 @@ const { getPagination, paginationMeta } = require('../utils/pagination');
 const shared = require('./orderShared');
 const { ORDER_STATUS, ORDER_STATUS_LABELS, SELLER_ORDER_STATUS, PAYMENT_METHODS, PAYMENT_STATUS_LABELS } = require('../config/orders');
 
-const { sequelize, Order, SellerOrder, Payment, User } = models;
+const { sequelize, Order, SellerOrder, Payment, User, CancellationRequest, Claim, Refund } = models;
+const cancellations = require('./cancellation.service');
+const claims = require('./claim.service');
+const refunds = require('./refund.service');
 const { num, money, round2, totalsShape, sellerOrderShape, paymentShape, sortedPayments, timeline, fullIncludes, loadOrder, orderNotFound, isLate } = shared;
 
 // ---------- orders ----------
@@ -99,9 +102,12 @@ async function stats() {
   grouped.forEach((g) => {
     byStatus[g.status] = { count: Number(g.total), amount: round2(g.amount || 0) };
   });
-  const [lateSellerOrders, paymentsToReview] = await Promise.all([
+  const [lateSellerOrders, paymentsToReview, cancelRequestsToDecide, claimsToDecide, refundsToPay] = await Promise.all([
     SellerOrder.count({ where: { status: SELLER_ORDER_STATUS.PAID, confirmBy: { [Op.lt]: new Date() } } }),
     Payment.count({ where: { method: 'bank_transfer', status: 'under_review' } }),
+    CancellationRequest.count({ where: { status: 'escalated' } }),
+    Claim.count({ where: { status: 'escalated' } }),
+    Refund.count({ where: { status: 'pending' } }),
   ]);
   return {
     totalOrders: Object.values(byStatus).reduce((n, s) => n + s.count, 0),
@@ -113,6 +119,9 @@ async function stats() {
     paidValueLabel: money(byStatus.paid.amount),
     lateSellerOrders,
     paymentsToReview,
+    cancelRequestsToDecide,
+    claimsToDecide,
+    refundsToPay,
   };
 }
 
@@ -131,11 +140,30 @@ async function list(query = {}) {
   return { items: await shapeMany(full), pagination: paginationMeta(pg, count) };
 }
 
-// GET /admin/orders/:id
+// GET /admin/orders/:id   (+ cancellation requests, claims and refunds)
 async function getById(id) {
   const order = await loadOrder({ id });
   if (!order) throw orderNotFound();
-  return (await shapeMany([order], { full: true }))[0];
+  const shaped = (await shapeMany([order], { full: true }))[0];
+  const soIds = shaped.sellerOrders.map((so) => so.id);
+  const [requests, claimRows, refundRows] = await Promise.all([
+    cancellations.requestsFor(soIds),
+    claims.claimsFor({ type: 'admin' }, soIds),
+    refunds.shapeMany((order.refunds || []).slice().sort((a, b) => b.id - a.id), { view: 'admin' }),
+  ]);
+  shaped.sellerOrders = shaped.sellerOrders.map((so) => ({
+    ...so,
+    cancelRequests: requests.filter((r) => r.sellerOrder.id === so.id),
+    claims: claimRows.filter((c) => c.sellerOrder.id === so.id),
+    remainingRefundable: shared.round2(so.total - so.refundedAmount),
+    actions: {
+      canCancel: !['awaiting_payment', 'completed', 'cancelled'].includes(so.status),
+      canRefund: Boolean(so.dates.paidAt) && so.total - so.refundedAmount > 0,
+    },
+  }));
+  shaped.refunds = refundRows;
+  shaped.refundedTotal = shared.round2(refundRows.reduce((s, r) => s + r.amount, 0));
+  return shaped;
 }
 
 // GET /admin/orders/export

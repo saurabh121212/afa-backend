@@ -14,8 +14,18 @@
 //   GET    /me/orders/:id/payments/:paymentId/receipt         view your uploaded proof
 //   POST   /me/orders/:id/cancel                              { reason? } cancel an UNPAID order (stock goes back)
 //   POST   /me/orders/:id/seller-orders/:sellerOrderId/received   "I received it"
+//
+// Phase 4 (cancel a PAID order, report a problem):
+//   POST   /me/orders/:id/seller-orders/:sellerOrderId/cancel          { reason }
+//                                                             "New Order" -> cancelled now (full refund)
+//                                                             Confirmed / Packed -> request to the seller
+//   DELETE /me/orders/:id/seller-orders/:sellerOrderId/cancel-request  withdraw the request
+//   GET    /me/orders/:id/seller-orders/:sellerOrderId/claim-options   what can be claimed (then POST /me/claims)
 const express = require('express');
 const controller = require('../controllers/order.controller');
+const cancellation = require('../controllers/cancellation.controller');
+const claim = require('../controllers/claim.controller').buyer;
+const refundRules = require('../validators/refund.validator');
 const rules = require('../validators/order.validator');
 const validate = require('../middlewares/validate');
 const validateUpload = require('../middlewares/validateUpload');
@@ -44,5 +54,8 @@ router.post(
 router.get('/:id/payments/:paymentId/receipt', rules.receipt, validate, controller.receipt);
 router.post('/:id/cancel', rules.cancel, validate, controller.cancel);
 router.post('/:id/seller-orders/:sellerOrderId/received', rules.received, validate, controller.received);
+router.post('/:id/seller-orders/:sellerOrderId/cancel', refundRules.buyerCancel, validate, cancellation.buyerCancel);
+router.delete('/:id/seller-orders/:sellerOrderId/cancel-request', refundRules.sellerOrderParams, validate, cancellation.withdrawRequest);
+router.get('/:id/seller-orders/:sellerOrderId/claim-options', refundRules.sellerOrderParams, validate, claim.options);
 
 module.exports = router;

@@ -136,6 +136,9 @@ const received = [idParam, id('sellerOrderId', 'Seller order id')];
 const salesList = [
   oneOf(query('status'), 'status', SELLER_STATUSES),
   query('late').optional({ values: 'falsy' }).isIn(['true', 'false']).withMessage('late must be true or false').bail().customSanitizer((v) => v === 'true'),
+  // Phase 4: only orders with a cancellation request waiting / an open claim
+  query('cancelRequest').optional({ values: 'falsy' }).isIn(['true', 'false']).withMessage('cancelRequest must be true or false').bail().customSanitizer((v) => v === 'true'),
+  query('openClaim').optional({ values: 'falsy' }).isIn(['true', 'false']).withMessage('openClaim must be true or false').bail().customSanitizer((v) => v === 'true'),
   dateQuery('from', false),
   dateQuery('to', true),
   search,

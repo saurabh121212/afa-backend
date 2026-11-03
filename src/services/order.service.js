@@ -12,6 +12,9 @@ const { getPagination, paginationMeta } = require('../utils/pagination');
 const shared = require('./orderShared');
 const { ORDER_STATUS, ORDER_STATUS_LABELS, SELLER_ORDER_STATUS, PAYMENT_METHODS } = require('../config/orders');
 const orderNotify = require('./orderNotify.service');
+const cancellations = require('./cancellation.service');
+const claims = require('./claim.service');
+const { refundShape } = require('./refund.service');
 
 const { sequelize, Order, SellerOrder } = models;
 const { num, money, totalsShape, sellerOrderShape, paymentShape, sortedPayments, timeline, fullIncludes, loadOrder, orderNotFound } = shared;
@@ -42,6 +45,9 @@ function buyerShape(order, { dirs, bank }) {
       sellerOrderShape(so, { view: 'buyer', seller: sellerShape(so.sellerId, dirs.get(so.sellerId)), history: order.history || [] })
     ),
     payments: sortedPayments(order).map((p) => paymentShape(p)),
+    // Phase 4: refunds of this order (cancellations, claims, AFA refunds)
+    refunds: (order.refunds || []).slice().sort((a, b) => b.id - a.id).map((r) => refundShape(r, { view: 'buyer', order })),
+    refundedTotal: shared.round2((order.refunds || []).reduce((s, r) => s + num(r.amount), 0)),
     // Bank transfer: where to pay and which reference to use
     paymentInstructions:
       isBank && (awaiting || order.status === S.UNDER_REVIEW)
@@ -72,10 +78,19 @@ async function shapeMany(orders) {
 }
 
 // ---------- GET /me/orders/:id ----------
+// Each seller order also gets its cancellation request (if any) and claims.
 async function getMine(user, id) {
   const order = await loadOrder({ id, userId: user.id });
   if (!order) throw orderNotFound();
-  return (await shapeMany([order]))[0];
+  const shaped = (await shapeMany([order]))[0];
+  const soIds = shaped.sellerOrders.map((so) => so.id);
+  const [requests, claimRows] = await Promise.all([cancellations.requestsFor(soIds), claims.claimsFor({ type: 'buyer', id: user.id }, soIds)]);
+  shaped.sellerOrders = shaped.sellerOrders.map((so) => ({
+    ...so,
+    cancelRequest: requests.find((r) => r.sellerOrder.id === so.id && r.id === so.openCancelRequestId) || requests.find((r) => r.sellerOrder.id === so.id) || null,
+    claims: claimRows.filter((c) => c.sellerOrder.id === so.id),
+  }));
+  return shaped;
 }
 
 // ---------- GET /me/orders?status=&search=&page= ----------
@@ -95,7 +110,7 @@ async function listMine(user, query = {}) {
   const full = rows.length
     ? await Order.findAll({ where: { id: rows.map((r) => r.id) }, include: fullIncludes(), order: [['createdAt', 'DESC'], ['id', 'DESC']] })
     : [];
-  const items = (await shapeMany(full)).map(({ timeline: t, payments, ...rest }) => ({
+  const items = (await shapeMany(full)).map(({ timeline: t, payments, refunds: r, ...rest }) => ({
     ...rest,
     latestPayment: payments[0] || null,
   }));

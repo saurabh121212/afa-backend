@@ -28,7 +28,9 @@ router.use('/register', require('./registration.routes')); // resume, progress, 
 router.use('/me/listings', require('./myListing.routes')); // seller's own listings (before /me)
 router.use('/me/cart', require('./cart.routes')); // buyer cart (before /me)
 router.use('/me/orders', require('./order.routes')); // buyer checkout + orders (before /me)
-router.use('/me/sales', require('./sales.routes')); // seller orders received (before /me)
+router.use('/me/sales', require('./sales.routes')); // seller orders received + claims (before /me)
+router.use('/me/claims', require('./claim.routes')); // buyer claims: problems after delivery (before /me)
+router.use('/me/refunds', require('./refund.routes')); // buyer refunds + refund bank account (before /me)
 router.use('/me/conversations', require('./chat/conversation.routes')); // chat (your module, before /me)
 router.use('/me', require('./me.routes')); // logged-in user's own account (profile, payments, KYC documents)
 
@@ -51,8 +53,10 @@ router.use('/admin/faqs', require('./adminFaq.routes')); // CMS FAQs + FAQ categ
 router.use('/admin/blogs', require('./adminBlog.routes')); // CMS Blog & Resources
 router.use('/admin/contact-messages', require('./adminContact.routes')); // Contact Us inbox
 router.use('/admin/vat-registrations', require('./adminVat.routes')); // sellers' VAT registration review
-router.use('/admin/orders', require('./adminOrder.routes')); // Orders & Transactions
+router.use('/admin/orders', require('./adminOrder.routes')); // Orders & Transactions (+ cancellation requests)
 router.use('/admin/payments', require('./adminPayment.routes')); // bank transfer review queue
+router.use('/admin/claims', require('./adminClaim.routes')); // claims: decide escalated problems
+router.use('/admin/refunds', require('./adminRefund.routes')); // refunds to pay
 router.use('/admin/settings', require('./adminSetting.routes')); // System Settings (VAT rate, payment time limit...)
 
 module.exports = router;

@@ -1,11 +1,18 @@
 // Background jobs for orders, run inside the API every minute:
 //   1. cancel orders not paid by their deadline (stock goes back)  -> payment.service.cancelOverdue
 //   2. complete delivered / collected orders whose claim window ended
-//      (seller payout released)                                    -> sellerOrder.service.completeDue
+//      (seller payout released; not while a claim is active)      -> sellerOrder.service.completeDue
+//   3. cancel paid orders the seller did not confirm in time
+//      (full refund)                                               -> cancellation.service.autoCancelUnconfirmed
+//   4. cancellation requests not answered in time -> AFA decides   -> cancellation.service.escalateRequests
+//   5. claims: no seller reply in time -> AFA; rejected and not
+//      escalated / item not returned in time -> closed             -> claim.service.runDue
 //
 // Turn off with RUN_JOBS=false (e.g. on extra servers if the API ever runs on more than one).
 const paymentService = require('../services/payment.service');
 const sellerOrderService = require('../services/sellerOrder.service');
+const cancellationService = require('../services/cancellation.service');
+const claimService = require('../services/claim.service');
 
 const EVERY_MS = 60 * 1000;
 let timer = null;
@@ -16,11 +23,18 @@ async function runOnce() {
   running = true;
   try {
     const cancelled = await paymentService.cancelOverdue();
+    const autoCancelled = await cancellationService.autoCancelUnconfirmed();
+    const requestsEscalated = await cancellationService.escalateRequests();
+    const claimsDue = await claimService.runDue();
     const completed = await sellerOrderService.completeDue();
-    if (cancelled || completed) {
-      console.log(`🕒 Order jobs: ${cancelled} unpaid order(s) cancelled, ${completed} order(s) completed`);
+    const result = { cancelled, autoCancelled, requestsEscalated, claimsEscalated: claimsDue.escalated, claimsClosed: claimsDue.closed, completed };
+    if (Object.values(result).some(Boolean)) {
+      console.log(
+        `🕒 Order jobs: ${cancelled} unpaid cancelled, ${autoCancelled} unconfirmed cancelled, ${requestsEscalated} request(s) + ` +
+          `${claimsDue.escalated} claim(s) sent to AFA, ${claimsDue.closed} claim(s) closed, ${completed} completed`
+      );
     }
-    return { cancelled, completed };
+    return result;
   } catch (err) {
     console.error('Order jobs failed:', err.message);
     return null;

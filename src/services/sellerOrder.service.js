@@ -8,6 +8,8 @@
 // Delivered / Collected starts the claim window: the longest of the items' refund policies
 // (farm produce 24 hours, farming products 7 days). The background job then completes it.
 // Sellers only see orders that are PAID (or later).
+// Phase 4: no status change while the buyer's cancellation request waits for an answer;
+// not completed while a claim is active (payout stays held).
 const { Op } = require('sequelize');
 const models = require('../models');
 const ApiError = require('../utils/ApiError');
@@ -24,6 +26,8 @@ const {
 } = require('../config/orders');
 
 const { sequelize, Order, SellerOrder, OrderItem, OrderStatusHistory, User } = models;
+const cancellations = require('./cancellation.service');
+const claims = require('./claim.service');
 const { num, money, addHours, recordHistory, sellerOrderShape, isLate } = shared;
 const SO = SELLER_ORDER_STATUS;
 const orderNotify = require('./orderNotify.service');
@@ -63,6 +67,8 @@ const listIncludes = () => [
 async function buildWhere(seller, query = {}) {
   const where = { sellerId: seller.id, ...SELLER_VISIBLE };
   if (query.status) where.status = query.status;
+  if (query.cancelRequest === true) where.openCancelRequestId = { [Op.ne]: null };
+  if (query.openClaim === true) where.claimStatus = 'active';
   if (query.late === true) {
     where.status = SO.PAID;
     where.confirmBy = { [Op.lt]: new Date() };
@@ -114,13 +120,15 @@ async function shapeForSeller(rows, { withHistory = false } = {}) {
 async function stats(seller) {
   const rows = await SellerOrder.findAll({
     where: { sellerId: seller.id, ...SELLER_VISIBLE },
-    attributes: ['status', 'total', 'payoutStatus', 'payoutAmount', 'confirmBy'],
+    attributes: ['status', 'total', 'payoutStatus', 'payoutAmount', 'confirmBy', 'refundedAmount', 'cancelledBy', 'openCancelRequestId', 'claimStatus'],
   });
   const byStatus = Object.fromEntries(Object.values(SO).filter((s) => s !== SO.AWAITING_PAYMENT).map((s) => [s, 0]));
   let sales = 0;
   let held = 0;
   let released = 0;
+  let refunded = 0;
   rows.forEach((r) => {
+    refunded += num(r.refundedAmount || 0);
     byStatus[r.status] = (byStatus[r.status] || 0) + 1;
     if (r.status !== SO.CANCELLED) sales += num(r.total);
     if (r.payoutStatus === 'held') held += num(r.payoutAmount);
@@ -135,10 +143,15 @@ async function stats(seller) {
     completed: byStatus.completed,
     cancelled: byStatus.cancelled,
     byStatus,
+    cancelRequests: rows.filter((r) => r.openCancelRequestId).length,
+    openClaims: rows.filter((r) => r.claimStatus === 'active').length,
+    cancelledBySeller: rows.filter((r) => r.status === SO.CANCELLED && r.cancelledBy === 'seller').length,
+    autoCancelled: rows.filter((r) => r.status === SO.CANCELLED && r.cancelledBy === 'system').length,
     totalSales: shared.round2(sales),
+    refunded: shared.round2(refunded),
     payoutHeld: shared.round2(held),
     payoutReleased: shared.round2(released),
-    labels: { totalSales: money(sales), payoutHeld: money(held), payoutReleased: money(released) },
+    labels: { totalSales: money(sales), refunded: money(refunded), payoutHeld: money(held), payoutReleased: money(released) },
   };
 }
 
@@ -167,16 +180,29 @@ async function findOwn(seller, id, { transaction, lock = false } = {}) {
   return so;
 }
 
-// GET /me/sales/:id
+// GET /me/sales/:id   (+ cancellation requests and claims of this order)
 async function getOne(seller, id) {
   const so = await findOwn(seller, id);
-  return (await shapeForSeller([so], { withHistory: true }))[0];
+  const [shaped, requests, claimRows] = await Promise.all([
+    shapeForSeller([so], { withHistory: true }),
+    cancellations.requestsFor([so.id]),
+    claims.claimsFor({ type: 'seller', id: seller.id }, [so.id]),
+  ]);
+  return {
+    ...shaped[0],
+    cancelRequest: requests.find((r) => r.id === so.openCancelRequestId) || null,
+    cancelRequests: requests,
+    claims: claimRows,
+  };
 }
 
 // PATCH /me/sales/:id/status  { status, note? }
 async function setStatus(seller, id, { status, note }) {
   await sequelize.transaction(async (transaction) => {
     const so = await findOwn(seller, id, { transaction, lock: true });
+    if (so.openCancelRequestId) {
+      throw new ApiError(409, 'The buyer asked to cancel this order. Please accept or decline the request first.', { code: 'CANCEL_REQUEST_PENDING' });
+    }
     const allowed = (SELLER_TRANSITIONS[so.status] || {})[so.fulfilment] || [];
     if (!allowed.includes(status)) {
       const nextText = allowed.length ? ` Next step: ${allowed.map((s) => SELLER_ORDER_STATUS_LABELS[s]).join(' or ')}.` : '';
@@ -218,9 +244,10 @@ async function exportCsv(seller, query = {}) {
 }
 
 // ---------- background job: claim window ended -> Completed, payout released ----------
+// Not while a claim is active (it completes on the next run after the claim is settled).
 async function completeDue({ limit = 100 } = {}) {
   const due = await SellerOrder.findAll({
-    where: { status: { [Op.in]: [SO.DELIVERED, SO.COLLECTED] }, completeAfter: { [Op.lte]: new Date() } },
+    where: { status: { [Op.in]: [SO.DELIVERED, SO.COLLECTED] }, completeAfter: { [Op.lte]: new Date() }, claimStatus: { [Op.ne]: 'active' } },
     attributes: ['id'],
     limit,
   });
@@ -229,8 +256,8 @@ async function completeDue({ limit = 100 } = {}) {
     // eslint-disable-next-line no-await-in-loop
     const done = await sequelize.transaction(async (transaction) => {
       const so = await SellerOrder.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
-      if (!so || ![SO.DELIVERED, SO.COLLECTED].includes(so.status) || new Date(so.completeAfter) > new Date()) return false;
-      await so.update({ payoutStatus: 'released' }, { transaction });
+      if (!so || ![SO.DELIVERED, SO.COLLECTED].includes(so.status) || new Date(so.completeAfter) > new Date() || so.claimStatus === 'active') return false;
+      if (so.payoutStatus === 'held') await so.update({ payoutStatus: 'released' }, { transaction });
       await applyStatus(so, SO.COMPLETED, { type: 'system' }, { note: 'Claim window ended' }, transaction);
       return true;
     });

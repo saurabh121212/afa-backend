@@ -35,6 +35,13 @@ module.exports = (sequelize, DataTypes) => {
       completeAfter: { type: DataTypes.DATE, allowNull: true },
       completedAt: { type: DataTypes.DATE, allowNull: true },
       cancelledAt: { type: DataTypes.DATE, allowNull: true },
+      // Phase 4: cancellations, claims, refunds
+      cancelReason: { type: DataTypes.STRING(500), allowNull: true },
+      cancelledBy: { type: DataTypes.ENUM('buyer', 'seller', 'admin', 'system'), allowNull: true },
+      refundedAmount: money,
+      claimStatus: { type: DataTypes.ENUM('none', 'active', 'closed'), allowNull: false, defaultValue: 'none' },
+      openCancelRequestId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      activeClaimId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
     },
     { tableName: 'seller_orders' }
   );
@@ -43,6 +50,9 @@ module.exports = (sequelize, DataTypes) => {
     SellerOrder.belongsTo(models.Order, { as: 'order', foreignKey: 'orderId' });
     SellerOrder.belongsTo(models.User, { as: 'seller', foreignKey: 'sellerId' });
     SellerOrder.hasMany(models.OrderItem, { as: 'items', foreignKey: 'sellerOrderId' });
+    SellerOrder.hasMany(models.CancellationRequest, { as: 'cancelRequests', foreignKey: 'sellerOrderId' });
+    SellerOrder.hasMany(models.Claim, { as: 'claims', foreignKey: 'sellerOrderId' });
+    SellerOrder.hasMany(models.Refund, { as: 'refunds', foreignKey: 'sellerOrderId' });
   };
 
   return SellerOrder;
