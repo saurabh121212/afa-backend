@@ -86,8 +86,9 @@ async function cancelUnpaid(order, { actor, reason }, transaction) {
     { where: { orderId: order.id, status: { [Op.in]: ['pending', 'under_review'] } }, transaction }
   );
 
-  // Stock back (also for listings the seller deleted meanwhile; "unlimited" stock stays NULL)
-  const items = await OrderItem.findAll({ where: { orderId: order.id }, attributes: ['listingId', 'quantity'], transaction });
+  // Stock back (also for listings the seller deleted meanwhile; "unlimited" stock stays NULL).
+  // Service bookings have no stock: their dates free up because the order is cancelled.
+  const items = order.kind === 'booking' ? [] : await OrderItem.findAll({ where: { orderId: order.id }, attributes: ['listingId', 'quantity'], transaction });
   for (const item of items) {
     // eslint-disable-next-line no-await-in-loop
     await sequelize.query('UPDATE listings SET quantity = quantity + :qty WHERE id = :id AND quantity IS NOT NULL', {

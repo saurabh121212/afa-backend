@@ -1,5 +1,10 @@
 // SELLER orders received ("My Sales"), mounted at /api/v1/me/sales.
-// Farmers and traders (product sellers) with an approved account. Only PAID orders are shown.
+// Farmers and traders (product orders) and logistics providers (service bookings) with an approved account.
+// Only PAID orders are shown.
+//
+// Service bookings (fulfilment "service", the "booking" object has the dates, addresses, distance / load / space):
+//   PATCH /me/sales/:id/status   paid -> confirmed -> in_progress -> delivered ("Service Done")
+//   The buyer then confirms (Completed) or reports a problem within 3 days; after that it completes on its own.
 //
 //   GET    /me/sales/stats          New / Late / In progress / Completed, sales and payout totals
 //   GET    /me/sales                list (?status=&late=true&from=&to=&search=&sort=&page=)
@@ -44,7 +49,7 @@ const photos = uploadPrivateFiles({
 });
 
 const router = express.Router();
-router.use(protectUser, requireUserType('farmer', 'trader'), requireApprovedAccount);
+router.use(protectUser, requireUserType('farmer', 'trader', 'logistics'), requireApprovedAccount);
 
 // Claims (before /:id)
 router.get('/claims', refundRules.claimList, validate, claim.list);

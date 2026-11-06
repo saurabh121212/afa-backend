@@ -124,6 +124,8 @@ const listingFields = [
   code('capacityUnit', 'Capacity unit'),
   number('minBooking', 'Minimum booking', { min: 0.01, max: 100000 }),
   code('minBookingUnit', 'Minimum booking unit'),
+  // how many of this service can be booked for the same dates (e.g. 3 tractors). Empty = 1
+  number('unitsAvailable', 'Units available', { min: 1, max: 1000, int: true }),
   // availability
   code('availability', 'Availability'),
   futureDate('availableFrom', 'Available date'),
@@ -195,9 +197,10 @@ const inventory = [
   number('quantity', 'Quantity', { min: 0, max: 1000000000 }),
   code('availability', 'Availability'),
   futureDate('availableFrom', 'Available date'),
+  number('unitsAvailable', 'Units available', { min: 1, max: 1000, int: true }), // services
   body().custom((v) => {
-    if (!v || !['quantity', 'availability', 'availableFrom'].some((f) => v[f] !== undefined)) {
-      throw new Error('Send at least one of: quantity, availability, availableFrom');
+    if (!v || !['quantity', 'availability', 'availableFrom', 'unitsAvailable'].some((f) => v[f] !== undefined)) {
+      throw new Error('Send at least one of: quantity, availability, availableFrom, unitsAvailable');
     }
     return true;
   }),
@@ -276,6 +279,13 @@ const adminList = [
     .isIn(SELLER_USER_TYPES)
     .withMessage(`sellerType must be one of: ${SELLER_USER_TYPES.join(', ')}`),
   query('sort').optional({ values: 'falsy' }).trim().isIn(['newest', 'oldest']).withMessage('sort must be newest or oldest'),
+  // true = only listings hidden because the seller needs VAT registration
+  query('vatHold')
+    .optional({ values: 'falsy' })
+    .isIn(['true', 'false'])
+    .withMessage('vatHold must be true or false')
+    .bail()
+    .customSanitizer((v) => v === 'true'),
   ...paging,
 ];
 

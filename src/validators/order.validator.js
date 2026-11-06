@@ -1,14 +1,15 @@
 // Validation for checkout, payments and the buyer / seller / admin order screens.
 const { body, param, query, header } = require('express-validator');
 const { MAX_LIMIT } = require('../utils/pagination');
-const { ORDER_STATUS, SELLER_ORDER_STATUS, PAYMENT_METHODS } = require('../config/orders');
+const { ORDER_STATUS, SELLER_ORDER_STATUS, PAYMENT_METHODS, ORDER_KINDS } = require('../config/orders');
 const { normalizeEswatiniMobile } = require('./common');
 
 const METHODS = Object.keys(PAYMENT_METHODS);
 const ORDER_STATUSES = Object.values(ORDER_STATUS);
 const SELLER_STATUSES = Object.values(SELLER_ORDER_STATUS).filter((s) => s !== SELLER_ORDER_STATUS.AWAITING_PAYMENT);
 // What a seller can SET (the rest are set by payments / the system)
-const SELLER_SETTABLE = ['confirmed', 'packed', 'dispatched', 'ready_for_pickup', 'delivered', 'collected'];
+// in_progress: service bookings only ("In Progress"); "delivered" on a booking = "Service Done"
+const SELLER_SETTABLE = ['confirmed', 'in_progress', 'packed', 'dispatched', 'ready_for_pickup', 'delivered', 'collected'];
 const PAYMENT_STATUSES = ['pending', 'under_review', 'succeeded', 'failed', 'rejected', 'expired'];
 
 const id = (name, label) => param(name).isInt({ min: 1 }).withMessage(`${label} must be a positive number`).toInt();
@@ -64,7 +65,8 @@ const placeOrder = [
 ];
 
 // GET /me/orders
-const myList = [oneOf(query('status'), 'status', ORDER_STATUSES), search, ...paging];
+const KINDS = Object.keys(ORDER_KINDS);
+const myList = [oneOf(query('status'), 'status', ORDER_STATUSES), oneOf(query('kind'), 'kind', KINDS), search, ...paging];
 
 const byId = [idParam];
 
@@ -159,6 +161,7 @@ const salesStatus = [
 // GET /admin/orders, /export
 const adminList = [
   oneOf(query('status'), 'status', ORDER_STATUSES),
+  oneOf(query('kind'), 'kind', KINDS),
   oneOf(query('paymentMethod'), 'paymentMethod', METHODS),
   query('sellerId').optional({ values: 'falsy' }).isInt({ min: 1 }).withMessage('sellerId must be a positive number').toInt(),
   dateQuery('from', false),
@@ -181,6 +184,7 @@ const confirmPayment = [idParam, reasonField('note', 'Note', false)];
 const rejectPayment = [idParam, reasonField('reason', 'Reason', true)];
 
 module.exports = {
+  KINDS,
   placeOrder,
   myList,
   byId,

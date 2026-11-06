@@ -20,6 +20,7 @@ const { num, money, round2, totalsShape, sellerOrderShape, paymentShape, sortedP
 async function buildWhere(query = {}) {
   const where = {};
   if (query.status) where.status = query.status;
+  if (query.kind) where.kind = query.kind; // product | booking
   if (query.paymentMethod) where.paymentMethod = query.paymentMethod;
   if (query.from || query.to) {
     where.createdAt = { ...(query.from ? { [Op.gte]: query.from } : {}), ...(query.to ? { [Op.lte]: query.to } : {}) };

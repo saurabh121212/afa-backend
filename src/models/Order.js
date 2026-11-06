@@ -1,6 +1,6 @@
 // One checkout: everything the buyer paid for in one go (AFA-ORD-000123).
 // Split into one SellerOrder per seller. Never deleted.
-const { ORDER_STATUS, PAYMENT_METHODS } = require('../config/orders');
+const { ORDER_STATUS, PAYMENT_METHODS, ORDER_KINDS } = require('../config/orders');
 
 module.exports = (sequelize, DataTypes) => {
   const money = { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 };
@@ -10,6 +10,7 @@ module.exports = (sequelize, DataTypes) => {
       id: { type: DataTypes.INTEGER.UNSIGNED, autoIncrement: true, primaryKey: true },
       orderNumber: { type: DataTypes.STRING(30), allowNull: true },
       userId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+      kind: { type: DataTypes.ENUM(...Object.keys(ORDER_KINDS)), allowNull: false, defaultValue: 'product' }, // product | booking
       status: { type: DataTypes.ENUM(...Object.values(ORDER_STATUS)), allowNull: false, defaultValue: ORDER_STATUS.AWAITING_PAYMENT },
       paymentMethod: { type: DataTypes.ENUM(...Object.keys(PAYMENT_METHODS)), allowNull: false },
       paymentDeadline: { type: DataTypes.DATE, allowNull: true },
@@ -37,6 +38,7 @@ module.exports = (sequelize, DataTypes) => {
     Order.hasMany(models.Payment, { as: 'payments', foreignKey: 'orderId' });
     Order.hasMany(models.OrderStatusHistory, { as: 'history', foreignKey: 'orderId' });
     Order.hasMany(models.Refund, { as: 'refunds', foreignKey: 'orderId' });
+    Order.hasOne(models.Booking, { as: 'booking', foreignKey: 'orderId' });
   };
 
   return Order;

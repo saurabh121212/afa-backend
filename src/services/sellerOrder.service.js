@@ -8,6 +8,8 @@
 // Delivered / Collected starts the claim window: the longest of the items' refund policies
 // (farm produce 24 hours, farming products 7 days). The background job then completes it.
 // Sellers only see orders that are PAID (or later).
+// Service bookings (logistics providers, fulfilment "service"):
+//   New Booking -> Confirmed -> In Progress -> Service Done -> buyer confirms / 72 hours -> Completed
 // Phase 4: no status change while the buyer's cancellation request waits for an answer;
 // not completed while a claim is active (payout stays held).
 const { Op } = require('sequelize');
@@ -23,9 +25,10 @@ const {
   SELLER_TRANSITIONS,
   STATUS_TIME_FIELD,
   CLAIM_WINDOW_HOURS,
+  statusLabelFor,
 } = require('../config/orders');
 
-const { sequelize, Order, SellerOrder, OrderItem, OrderStatusHistory, User } = models;
+const { sequelize, Order, SellerOrder, OrderItem, OrderStatusHistory, User, Booking } = models;
 const cancellations = require('./cancellation.service');
 const claims = require('./claim.service');
 const invoices = require('./invoice.service');
@@ -62,6 +65,7 @@ const SELLER_VISIBLE = { paidAt: { [Op.ne]: null } }; // only paid orders reach 
 
 const listIncludes = () => [
   { model: OrderItem, as: 'items' },
+  { model: Booking, as: 'booking' },
   { model: Order, as: 'order', attributes: ['id', 'orderNumber', 'userId', 'deliveryAddress', 'createdAt'] },
 ];
 
@@ -135,7 +139,7 @@ async function stats(seller) {
     if (r.payoutStatus === 'held') held += num(r.payoutAmount);
     if (r.payoutStatus === 'released') released += num(r.payoutAmount);
   });
-  const active = [SO.PAID, SO.CONFIRMED, SO.PACKED, SO.DISPATCHED, SO.READY_FOR_PICKUP, SO.DELIVERED, SO.COLLECTED].reduce((n, s) => n + byStatus[s], 0);
+  const active = [SO.PAID, SO.CONFIRMED, SO.IN_PROGRESS, SO.PACKED, SO.DISPATCHED, SO.READY_FOR_PICKUP, SO.DELIVERED, SO.COLLECTED].reduce((n, s) => n + byStatus[s], 0);
   return {
     totalOrders: rows.length,
     newOrders: byStatus.paid,
@@ -209,10 +213,11 @@ async function setStatus(seller, id, { status, note }) {
     }
     const allowed = (SELLER_TRANSITIONS[so.status] || {})[so.fulfilment] || [];
     if (!allowed.includes(status)) {
-      const nextText = allowed.length ? ` Next step: ${allowed.map((s) => SELLER_ORDER_STATUS_LABELS[s]).join(' or ')}.` : '';
+      const lbl = (st) => statusLabelFor({ fulfilment: so.fulfilment, status: st });
+      const nextText = allowed.length ? ` Next step: ${allowed.map(lbl).join(' or ')}.` : '';
       throw new ApiError(
         409,
-        `This order is "${SELLER_ORDER_STATUS_LABELS[so.status]}" and can't be moved to "${SELLER_ORDER_STATUS_LABELS[status]}".${nextText}`,
+        `This ${so.fulfilment === 'service' ? 'booking' : 'order'} is "${lbl(so.status)}" and can't be moved to "${lbl(status)}".${nextText}`,
         { code: 'INVALID_STATUS_CHANGE' }
       );
     }

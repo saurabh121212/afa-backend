@@ -10,7 +10,7 @@ const { bankDetails } = require('./checkout.service');
 const { applyStatus } = require('./sellerOrder.service');
 const { getPagination, paginationMeta } = require('../utils/pagination');
 const shared = require('./orderShared');
-const { ORDER_STATUS, ORDER_STATUS_LABELS, SELLER_ORDER_STATUS, PAYMENT_METHODS } = require('../config/orders');
+const { ORDER_STATUS, ORDER_STATUS_LABELS, SELLER_ORDER_STATUS, PAYMENT_METHODS, ORDER_KINDS } = require('../config/orders');
 const orderNotify = require('./orderNotify.service');
 const cancellations = require('./cancellation.service');
 const claims = require('./claim.service');
@@ -29,6 +29,8 @@ function buyerShape(order, { dirs, bank }) {
   return {
     id: order.id,
     orderNumber: order.orderNumber,
+    kind: order.kind || 'product',
+    kindLabel: ORDER_KINDS[order.kind || 'product'],
     status: order.status,
     statusLabel: ORDER_STATUS_LABELS[order.status],
     placedAt: order.createdAt,
@@ -67,7 +69,7 @@ function buyerShape(order, { dirs, bank }) {
       canChangePaymentMethod: awaiting,
       canCancel: awaiting,
     },
-    timeline: timeline(order.history || []),
+    timeline: timeline(order.history || [], null, order.kind === 'booking' ? 'service' : null),
   };
 }
 
@@ -104,10 +106,11 @@ async function getMine(user, id) {
 }
 
 // ---------- GET /me/orders?status=&search=&page= ----------
-// status: awaiting_payment | under_review | paid | cancelled ; search: order number
+// status: awaiting_payment | under_review | paid | cancelled ; search: order number ; kind: product | booking
 async function listMine(user, query = {}) {
   const pg = getPagination(query);
   const where = { userId: user.id };
+  if (query.kind) where.kind = query.kind; // product | booking (My Bookings)
   if (query.status) where.status = query.status;
   if (query.search) where.orderNumber = { [Op.like]: `%${query.search}%` };
 
@@ -127,7 +130,7 @@ async function listMine(user, query = {}) {
 
   // Counts for the tabs
   const grouped = await Order.findAll({
-    where: { userId: user.id },
+    where: { userId: user.id, ...(query.kind ? { kind: query.kind } : {}) },
     attributes: ['status', [sequelize.fn('COUNT', sequelize.col('id')), 'total']],
     group: ['status'],
     raw: true,
@@ -148,7 +151,7 @@ async function confirmReceived(user, orderId, sellerOrderId) {
     if (!order) throw orderNotFound();
     const so = await SellerOrder.findOne({ where: { id: sellerOrderId, orderId: order.id }, transaction, lock: transaction.LOCK.UPDATE });
     if (!so) throw orderNotFound();
-    const to = { [SELLER_ORDER_STATUS.DISPATCHED]: SELLER_ORDER_STATUS.DELIVERED, [SELLER_ORDER_STATUS.READY_FOR_PICKUP]: SELLER_ORDER_STATUS.COLLECTED }[so.status];
+    const to = so.fulfilment === 'service' ? null : { [SELLER_ORDER_STATUS.DISPATCHED]: SELLER_ORDER_STATUS.DELIVERED, [SELLER_ORDER_STATUS.READY_FOR_PICKUP]: SELLER_ORDER_STATUS.COLLECTED }[so.status];
     if (!to) {
       throw new ApiError(409, 'You can confirm receipt once the seller has dispatched the order or it is ready for pickup', {
         code: 'INVALID_STATUS_CHANGE',

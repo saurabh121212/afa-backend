@@ -1,8 +1,8 @@
 // Shared pieces for checkout, payments and the buyer / seller / admin order screens:
 // loading an order, the API "shapes", the timeline and small helpers.
-const { Order, SellerOrder, OrderItem, OrderStatusHistory, Payment, Refund } = require('../models');
+const { Order, SellerOrder, OrderItem, OrderStatusHistory, Payment, Refund, Booking } = require('../models');
 const ApiError = require('../utils/ApiError');
-const { CURRENCY } = require('../config/listingOptions');
+const { CURRENCY, SERVICE_RATE_UNITS, CAPACITY_UNITS } = require('../config/listingOptions');
 const {
   ORDER_STATUS,
   ORDER_STATUS_LABELS,
@@ -12,7 +12,10 @@ const {
   PAYMENT_METHODS,
   PAYMENT_STATUS_LABELS,
   PAYOUT_STATUS_LABELS,
+  FULFILMENT_LABELS,
+  statusLabelFor,
 } = require('../config/orders');
+const { BOOKING_TYPES, SPACE_UNIT_LABELS, buyerCancelMode, daysBetween } = require('../config/bookings');
 const { BUYER_DIRECT_CANCEL, BUYER_REQUEST_CANCEL, SELLER_CANCEL, CANCELLED_BY_LABELS } = require('../config/refunds');
 
 // ---------- numbers ----------
@@ -54,14 +57,18 @@ const HISTORY_LABELS = {
   refund_failed: 'Refund Failed',
 };
 
-function timeline(history = [], sellerOrderId = null) {
+// fulfilment "service" (a booking) uses the booking words: "New Booking", "In Progress", "Service Done"
+const historyLabel = (status, fulfilment) =>
+  fulfilment === 'service' && SELLER_ORDER_STATUS_LABELS[status] ? statusLabelFor({ fulfilment, status }) : HISTORY_LABELS[status] || status;
+
+function timeline(history = [], sellerOrderId = null, fulfilment = null) {
   return history
     .filter((h) => !sellerOrderId || !h.sellerOrderId || h.sellerOrderId === sellerOrderId)
     .slice()
     .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt) || a.id - b.id)
     .map((h) => ({
       status: h.toStatus,
-      label: HISTORY_LABELS[h.toStatus] || h.toStatus,
+      label: h.toStatus === 'placed' && fulfilment === 'service' ? 'Booking Placed' : historyLabel(h.toStatus, fulfilment),
       at: h.createdAt,
       by: h.actorType,
       note: h.note,
@@ -71,7 +78,7 @@ function timeline(history = [], sellerOrderId = null) {
 
 // ---------- loading ----------
 const fullIncludes = () => [
-  { model: SellerOrder, as: 'sellerOrders', include: [{ model: OrderItem, as: 'items' }] },
+  { model: SellerOrder, as: 'sellerOrders', include: [{ model: OrderItem, as: 'items' }, { model: Booking, as: 'booking' }] },
   { model: Payment, as: 'payments' },
   { model: OrderStatusHistory, as: 'history' },
   { model: Refund, as: 'refunds' },
@@ -128,13 +135,47 @@ function itemShape(i) {
   };
 }
 
+// ---------- service bookings ----------
+const addressOut = (a) => (a ? { ...a } : null);
+function bookingShape(b) {
+  if (!b) return null;
+  const rateLabel = SERVICE_RATE_UNITS[b.rateUnit] || b.rateUnit;
+  return {
+    id: b.id,
+    bookingNumber: b.bookingNumber,
+    listingId: b.listingId,
+    bookingType: b.bookingType,
+    bookingTypeLabel: BOOKING_TYPES[b.bookingType] || b.bookingType,
+    rate: num(b.rate),
+    rateUnit: b.rateUnit,
+    rateUnitLabel: rateLabel,
+    rateLabel: `${money(b.rate)} ${rateLabel}`,
+    startDate: b.startDate,
+    endDate: b.endDate,
+    startTime: b.startTime || null,
+    days: b.startDate && b.endDate ? daysBetween(b.startDate, b.endDate) : null,
+    distanceKm: num(b.distanceKm),
+    load: b.loadAmount === null || b.loadAmount === undefined ? null : { amount: num(b.loadAmount), unit: b.loadUnit, unitLabel: CAPACITY_UNITS[b.loadUnit] || b.loadUnit },
+    space: b.spaceAmount === null || b.spaceAmount === undefined ? null : { amount: num(b.spaceAmount), unit: b.spaceUnit, unitLabel: SPACE_UNIT_LABELS[b.spaceUnit] || b.spaceUnit },
+    quantity: num(b.quantity),
+    hours: num(b.hours),
+    breakdown: b.breakdown || [],
+    billableQuantity: num(b.billableQuantity),
+    minimumApplied: Boolean(b.minimumApplied),
+    pickupAddress: addressOut(b.pickupAddress),
+    dropoffAddress: addressOut(b.dropoffAddress),
+    serviceAddress: addressOut(b.serviceAddress),
+    createdAt: b.createdAt,
+  };
+}
+
 const isLate = (so) =>
   so.status === SELLER_ORDER_STATUS.PAID && so.confirmBy && new Date(so.confirmBy) < new Date();
 
 // Next statuses the seller can choose (none while the buyer's cancellation request waits for an answer)
 const sellerNextStatuses = (so) => (so.openCancelRequestId ? [] : (SELLER_TRANSITIONS[so.status] || {})[so.fulfilment] || []).map((s) => ({
   status: s,
-  label: SELLER_ORDER_STATUS_LABELS[s],
+  label: statusLabelFor({ fulfilment: so.fulfilment, status: s }),
 }));
 
 // view: 'buyer' | 'seller' | 'admin'
@@ -143,9 +184,11 @@ function sellerOrderShape(so, { view = 'buyer', seller = null, history = [] } = 
     id: so.id,
     sellerOrderNumber: so.sellerOrderNumber,
     status: so.status,
-    statusLabel: SELLER_ORDER_STATUS_LABELS[so.status],
+    statusLabel: statusLabelFor(so),
     fulfilment: so.fulfilment,
-    fulfilmentLabel: so.fulfilment === 'pickup' ? 'Pickup' : 'Delivery',
+    fulfilmentLabel: FULFILMENT_LABELS[so.fulfilment] || so.fulfilment,
+    isBooking: so.fulfilment === 'service',
+    booking: so.fulfilment === 'service' ? bookingShape(so.booking) : null,
     seller,
     items: (so.items || []).slice().sort((a, b) => a.id - b.id).map(itemShape),
     subtotal: num(so.subtotal),
@@ -162,6 +205,7 @@ function sellerOrderShape(so, { view = 'buyer', seller = null, history = [] } = 
     dates: {
       paidAt: so.paidAt,
       confirmedAt: so.confirmedAt,
+      startedAt: so.startedAt || null,
       packedAt: so.packedAt,
       dispatchedAt: so.dispatchedAt,
       readyAt: so.readyAt,
@@ -182,16 +226,21 @@ function sellerOrderShape(so, { view = 'buyer', seller = null, history = [] } = 
     claimWindowEndsAt: [SELLER_ORDER_STATUS.DELIVERED, SELLER_ORDER_STATUS.COLLECTED].includes(so.status) ? so.completeAfter : null,
     refundedAmount: num(so.refundedAmount || 0),
     refundedLabel: money(so.refundedAmount || 0),
-    timeline: timeline(history, so.id),
+    timeline: timeline(history, so.id, so.fulfilment),
   };
   if (view === 'buyer') {
     const inWindow = [SELLER_ORDER_STATUS.DELIVERED, SELLER_ORDER_STATUS.COLLECTED].includes(so.status) && so.completeAfter && new Date(so.completeAfter) > new Date();
-    base.canConfirmReceived = [SELLER_ORDER_STATUS.DISPATCHED, SELLER_ORDER_STATUS.READY_FOR_PICKUP].includes(so.status);
+    const isBooking = so.fulfilment === 'service';
+    // Bookings: cancel at once until 24 hours before the start, then a request to the provider
+    const bookingMode = isBooking ? buyerCancelMode(so, so.booking) : null;
+    base.canConfirmReceived = !isBooking && [SELLER_ORDER_STATUS.DISPATCHED, SELLER_ORDER_STATUS.READY_FOR_PICKUP].includes(so.status);
     base.actions = {
       canConfirmReceived: base.canConfirmReceived,
+      // Bookings: "Service Done" -> the buyer confirms (completed) or reports a problem
+      canConfirmServiceDone: isBooking && so.status === SELLER_ORDER_STATUS.DELIVERED && (so.claimStatus || 'none') !== 'active',
       // "New Order": cancelled at once. Confirmed / Packed: a request to the seller.
-      canCancel: BUYER_DIRECT_CANCEL.includes(so.status),
-      canRequestCancel: BUYER_REQUEST_CANCEL.includes(so.status) && !so.openCancelRequestId,
+      canCancel: isBooking ? bookingMode === 'direct' : BUYER_DIRECT_CANCEL.includes(so.status),
+      canRequestCancel: (isBooking ? bookingMode === 'request' : BUYER_REQUEST_CANCEL.includes(so.status)) && !so.openCancelRequestId,
       canWithdrawCancelRequest: Boolean(so.openCancelRequestId),
       canReportProblem: Boolean(inWindow) && (so.claimStatus || 'none') === 'none',
     };
@@ -267,6 +316,7 @@ module.exports = {
   sortedPayments,
   isLate,
   sellerNextStatuses,
+  bookingShape,
   ORDER_STATUS,
   SELLER_ORDER_STATUS,
 };

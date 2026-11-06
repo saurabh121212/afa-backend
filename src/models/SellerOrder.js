@@ -15,7 +15,7 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         defaultValue: SELLER_ORDER_STATUS.AWAITING_PAYMENT,
       },
-      fulfilment: { type: DataTypes.ENUM('pickup', 'delivery'), allowNull: false },
+      fulfilment: { type: DataTypes.ENUM('pickup', 'delivery', 'service'), allowNull: false }, // service = a booking
       subtotal: money,
       deliveryFee: money,
       deliveryVat: money,
@@ -28,6 +28,7 @@ module.exports = (sequelize, DataTypes) => {
       paidAt: { type: DataTypes.DATE, allowNull: true },
       confirmBy: { type: DataTypes.DATE, allowNull: true },
       confirmedAt: { type: DataTypes.DATE, allowNull: true },
+      startedAt: { type: DataTypes.DATE, allowNull: true }, // bookings: "In Progress"
       packedAt: { type: DataTypes.DATE, allowNull: true },
       dispatchedAt: { type: DataTypes.DATE, allowNull: true },
       readyAt: { type: DataTypes.DATE, allowNull: true },
@@ -53,6 +54,7 @@ module.exports = (sequelize, DataTypes) => {
     SellerOrder.hasMany(models.CancellationRequest, { as: 'cancelRequests', foreignKey: 'sellerOrderId' });
     SellerOrder.hasMany(models.Claim, { as: 'claims', foreignKey: 'sellerOrderId' });
     SellerOrder.hasMany(models.Refund, { as: 'refunds', foreignKey: 'sellerOrderId' });
+    SellerOrder.hasOne(models.Booking, { as: 'booking', foreignKey: 'sellerOrderId' });
   };
 
   return SellerOrder;

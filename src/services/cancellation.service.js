@@ -10,6 +10,10 @@
 //
 // Stock goes back when the goods never left the seller. When every seller order of a checkout
 // is cancelled, the checkout itself becomes Cancelled.
+//
+// SERVICE BOOKINGS (fulfilment "service"): the buyer cancels at once while the booking is "New Booking",
+// or "Confirmed" until 24 hours before the start; after that it is a REQUEST to the provider.
+// No cancelling once "In Progress" (the admin can). The provider can cancel before it starts.
 const { Op } = require('sequelize');
 const models = require('../models');
 const ApiError = require('../utils/ApiError');
@@ -31,7 +35,9 @@ const {
   CLAIM_STATUS,
 } = require('../config/refunds');
 
-const { sequelize, Order, SellerOrder, OrderItem, CancellationRequest, Claim, ClaimMessage } = models;
+const { buyerCancelMode } = require('../config/bookings');
+
+const { sequelize, Order, SellerOrder, OrderItem, CancellationRequest, Claim, ClaimMessage, Booking } = models;
 const SO = SELLER_ORDER_STATUS;
 const CR = CANCEL_REQUEST_STATUS;
 
@@ -47,8 +53,8 @@ async function cancelSellerOrder(so, order, { actor, reason, source, refundAmoun
   const now = new Date();
   const from = so.status;
 
-  // Stock back if the goods never left the seller
-  if (RESTOCK_STATUSES.includes(from)) {
+  // Stock back if the goods never left the seller (services have no stock)
+  if (RESTOCK_STATUSES.includes(from) && so.fulfilment !== 'service') {
     const items = await OrderItem.findAll({ where: { sellerOrderId: so.id }, attributes: ['listingId', 'quantity'], transaction });
     for (const item of items) {
       // eslint-disable-next-line no-await-in-loop
@@ -160,13 +166,22 @@ async function buyerCancel(user, orderId, sellerOrderId, { reason }) {
   const out = await sequelize.transaction(async (transaction) => {
     const { order, so } = await lockForBuyer(user, orderId, sellerOrderId, transaction);
     const actor = { type: 'buyer', id: user.id };
+    // Bookings follow the start date (see buyerCancelMode)
+    const mode =
+      so.fulfilment === 'service'
+        ? buyerCancelMode(so, await Booking.findOne({ where: { sellerOrderId: so.id }, transaction }))
+        : BUYER_DIRECT_CANCEL.includes(so.status)
+          ? 'direct'
+          : BUYER_REQUEST_CANCEL.includes(so.status)
+            ? 'request'
+            : null;
 
-    if (BUYER_DIRECT_CANCEL.includes(so.status)) {
+    if (mode === 'direct') {
       const { refundId } = await cancelSellerOrder(so, order, { actor, reason, source: 'buyer_cancel' }, transaction);
       return { result: 'cancelled', refundId, sellerOrderId: so.id };
     }
 
-    if (BUYER_REQUEST_CANCEL.includes(so.status)) {
+    if (mode === 'request') {
       if (so.openCancelRequestId) {
         throw new ApiError(409, 'You already asked to cancel this order. Please wait for the answer.', { code: 'CANCEL_REQUEST_EXISTS' });
       }
@@ -233,7 +248,9 @@ async function sellerCancel(seller, sellerOrderId, { reason }) {
         409,
         so.status === SO.CANCELLED
           ? 'This order is already cancelled'
-          : `This order is "${statusLabel(so.status)}". Orders can only be cancelled before they are dispatched or ready for pickup. Please contact AFA.`,
+          : so.fulfilment === 'service'
+            ? `This booking is "${statusLabel(so.status)}". Bookings can only be cancelled before the service starts. Please contact AFA.`
+            : `This order is "${statusLabel(so.status)}". Orders can only be cancelled before they are dispatched or ready for pickup. Please contact AFA.`,
         { code: so.status === SO.CANCELLED ? 'ALREADY_CANCELLED' : 'CANNOT_CANCEL' }
       );
     }

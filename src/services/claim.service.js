@@ -60,7 +60,9 @@ function claimBlocker(so) {
   if (![SO.DELIVERED, SO.COLLECTED].includes(so.status)) {
     return so.status === SO.COMPLETED
       ? 'The time to report a problem with this order has ended'
-      : 'You can report a problem once the order is delivered or collected';
+      : so.fulfilment === 'service'
+        ? 'You can report a problem once the provider marks the service as done'
+        : 'You can report a problem once the order is delivered or collected';
   }
   if (!so.completeAfter || new Date(so.completeAfter) <= new Date()) return 'The time to report a problem with this order has ended';
   if (so.claimStatus === 'active') return 'There is already an open claim for this order';

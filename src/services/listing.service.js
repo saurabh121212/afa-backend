@@ -63,7 +63,7 @@ const PRODUCT_FIELDS = [
   'deliveryType', 'deliveryDuration', 'deliveryDurationUnit', 'logisticsBy', 'deliveryFees', 'nonReturnable',
 ];
 const SERVICE_FIELDS = [
-  'vehicleRegistration', 'makeModel', 'capacity', 'capacityUnit', 'minBooking', 'minBookingUnit',
+  'vehicleRegistration', 'makeModel', 'capacity', 'capacityUnit', 'minBooking', 'minBookingUnit', 'unitsAvailable',
   'advanceNotice', 'advanceNoticeUnit', 'coverageRegionIds',
 ];
 const FIELDS_BY_KIND = {
@@ -72,7 +72,7 @@ const FIELDS_BY_KIND = {
 };
 const NOT_CLEARABLE = ['name', 'useRegisteredAddress', 'nonReturnable'];
 // Changing only these does NOT send an active listing back to review
-const INVENTORY_FIELDS = ['quantity', 'availability', 'availableFrom'];
+const INVENTORY_FIELDS = ['quantity', 'availability', 'availableFrom', 'unitsAvailable'];
 const LOCATION_FIELDS = ['address', 'regionId', 'inkhundlaId', 'umphakatsiId'];
 
 // Allowed codes per kind: { field: { code: label } }
@@ -196,6 +196,7 @@ function baseShape(listing) {
           minBooking: num(l.minBooking),
           minBookingUnit: l.minBookingUnit,
           minBookingUnitLabel: label('minBookingUnit'),
+          unitsAvailable: l.unitsAvailable || 1, // bookable at the same time (e.g. 3 tractors)
           advanceNotice: l.advanceNotice,
           advanceNoticeUnit: l.advanceNoticeUnit,
           coverageRegionIds: l.coverageRegionIds || [],
@@ -454,6 +455,7 @@ async function buildValues(user, kind, data, rawBody, current = null) {
   }
 
   // Coverage regions (service)
+  if (values.unitsAvailable === null) values.unitsAvailable = 1; // cleared -> 1
   if (Array.isArray(values.coverageRegionIds)) {
     values.coverageRegionIds = [...new Set(values.coverageRegionIds)];
     await locationService.assertRegions(values.coverageRegionIds, 'coverageRegionIds');
@@ -627,7 +629,12 @@ async function updateInventory(user, id, data) {
       if (data.quantity !== undefined) values.quantity = data.quantity;
       if (data.availableFrom !== undefined) values.availableFrom = data.availableFrom;
     } else if (data.quantity !== undefined || data.availableFrom !== undefined) {
-      throw validationError([{ field: 'quantity', message: 'Services only have an availability status' }]);
+      throw validationError([{ field: 'quantity', message: 'Services only have an availability status and units available' }]);
+    } else if (data.unitsAvailable !== undefined) {
+      values.unitsAvailable = data.unitsAvailable === null ? 1 : data.unitsAvailable;
+    }
+    if (kind === 'product' && data.unitsAvailable !== undefined) {
+      throw validationError([{ field: 'unitsAvailable', message: 'Units available is only for services' }]);
     }
     checkChoices(kind, values);
 

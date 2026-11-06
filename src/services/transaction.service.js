@@ -18,7 +18,7 @@ const invoices = require('./invoice.service');
 const { toCsvLine } = require('../utils/csv');
 const { getPagination, paginationMeta } = require('../utils/pagination');
 const { round2, num, money } = require('./orderShared');
-const { ORDER_STATUS, ORDER_STATUS_LABELS, PAYMENT_METHODS, PAYMENT_STATUS_LABELS, PAYOUT_STATUS_LABELS, SELLER_ORDER_STATUS_LABELS } = require('../config/orders');
+const { ORDER_STATUS, ORDER_STATUS_LABELS, PAYMENT_METHODS, PAYMENT_STATUS_LABELS, PAYOUT_STATUS_LABELS, FULFILMENT_LABELS, statusLabelFor } = require('../config/orders');
 const { REFUND_STATUS_LABELS, REFUND_SOURCES } = require('../config/refunds');
 
 const { Order, SellerOrder, Payment, Refund, Invoice } = models;
@@ -145,7 +145,7 @@ async function sellerRows(seller, query = {}) {
         orderId: so.orderId,
         orderNumber: orderById.get(so.orderId) ? orderById.get(so.orderId).orderNumber : null,
         sellerOrderId: so.id,
-        description: `${SELLER_ORDER_STATUS_LABELS[so.status]} - ${so.fulfilment === 'pickup' ? 'Pickup' : 'Delivery'}`,
+        description: `${statusLabelFor(so)} - ${FULFILMENT_LABELS[so.fulfilment] || so.fulfilment}`,
         direction: 'in',
         amount: num(so.total),
         amountLabel: money(so.total),
@@ -153,7 +153,7 @@ async function sellerRows(seller, query = {}) {
         refunded: num(so.refundedAmount || 0),
         payout: { status: so.payoutStatus, statusLabel: PAYOUT_STATUS_LABELS[so.payoutStatus], amount: num(so.payoutAmount), amountLabel: money(so.payoutAmount) },
         status: so.status,
-        statusLabel: SELLER_ORDER_STATUS_LABELS[so.status],
+        statusLabel: statusLabelFor(so),
         document: docs.invoice.get(so.id) ? { type: 'invoice', ...docs.invoice.get(so.id) } : null,
       }))
     : [];

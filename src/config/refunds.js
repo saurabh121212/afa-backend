@@ -12,7 +12,9 @@ const BUYER_REQUEST_CANCEL = ['confirmed', 'packed'];
 // The seller can cancel any time before dispatch / ready for pickup
 const SELLER_CANCEL = ['paid', 'confirmed', 'packed'];
 // The admin can cancel any seller order that is not finished yet
-const ADMIN_CANCEL = ['paid', 'confirmed', 'packed', 'dispatched', 'ready_for_pickup', 'delivered', 'collected'];
+const ADMIN_CANCEL = ['paid', 'confirmed', 'in_progress', 'packed', 'dispatched', 'ready_for_pickup', 'delivered', 'collected'];
+// Bookings: the buyer cancels at once until 24 hours before the start, then sends a request
+// (see buyerCancelMode in config/bookings.js). The provider can cancel before the service starts.
 // Stock goes back to the listing only when the goods never left the seller
 const RESTOCK_STATUSES = ['paid', 'confirmed', 'packed'];
 
@@ -53,7 +55,8 @@ const NON_RETURNABLE_REASONS = ['wrong_item', 'missing_items', 'not_received'];
 // A photo is required for these reasons
 const PHOTO_REQUIRED_REASONS = ['damaged', 'wrong_item', 'poor_quality'];
 // No physical return for these refund policies (perishable): refund on the photos
-const NO_RETURN_POLICIES = ['farm_produce'];
+// Service bookings: nothing to send back either
+const NO_RETURN_POLICIES = ['farm_produce', 'booking'];
 
 const CLAIM_STATUS = {
   OPEN: 'open', // waiting for the seller's reply

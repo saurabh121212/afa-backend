@@ -17,7 +17,7 @@ const settings = require('./setting.service');
 const invoices = require('./invoice.service');
 const notify = require('./notification.service'); // in-app + push for every email below
 const { num, money, itemShape } = require('./orderShared');
-const { ORDER_STATUS, SELLER_ORDER_STATUS_LABELS } = require('../config/orders');
+const { ORDER_STATUS, FULFILMENT_LABELS, statusLabelFor } = require('../config/orders');
 
 const { Order, SellerOrder, OrderItem, OrderStatusHistory, Payment, User, Admin, Invoice } = models;
 
@@ -150,7 +150,10 @@ function orderPaid(orderId) {
         notify.toUser(so.sellerId, {
           type: 'order.new',
           title: `New order ${so.sellerOrderNumber}: ${money(so.total)}`,
-          body: `${buyerName} ordered (${so.fulfilment === 'pickup' ? 'Pickup' : 'Delivery'}). Confirm it before ${fmtDate(so.confirmBy)}.`,
+          body:
+            so.fulfilment === 'service'
+              ? `${buyerName} booked your service. Confirm the booking before ${fmtDate(so.confirmBy)}.`
+              : `${buyerName} ordered (${FULFILMENT_LABELS[so.fulfilment]}). Confirm it before ${fmtDate(so.confirmBy)}.`,
           data: { screen: 'sale', sellerOrderId: so.id, orderId: order.id },
         });
         return background(`new order seller ${so.sellerId}`, async () =>
@@ -161,7 +164,9 @@ function orderPaid(orderId) {
             subject: `New order ${so.sellerOrderNumber}`,
             title: 'You have a new paid order',
             lines: [
-              `${buyerName} ordered from you (${so.fulfilment === 'pickup' ? 'Pickup' : 'Delivery'}). The payment is received and held by AFA.`,
+              so.fulfilment === 'service'
+                ? `${buyerName} booked your service. The payment is received and held by AFA.`
+                : `${buyerName} ordered from you (${FULFILMENT_LABELS[so.fulfilment]}). The payment is received and held by AFA.`,
               `Please confirm the order before ${fmtDate(so.confirmBy)} in your AFA account (My Sales).`,
               'The invoice issued in your name is attached.',
             ],
@@ -310,25 +315,29 @@ function sellerOrderStatusChanged(sellerOrderId) {
     const toUserId = byBuyer ? so.sellerId : so.order.userId;
     const [user, dirs] = await Promise.all([User.findByPk(toUserId, { attributes: ['id', 'email', 'userType'] }), directory.findMany([toUserId])]);
     if (!user) return;
-    const label = SELLER_ORDER_STATUS_LABELS[so.status];
+    const label = statusLabelFor(so);
+    const isBooking = so.fulfilment === 'service';
+    const what = isBooking ? 'booking' : 'order';
     await notify.toUser(
       toUserId,
       byBuyer
         ? {
             type: 'order.received',
-            title: `${so.sellerOrderNumber}: received by the buyer`,
-            body: 'The buyer confirmed they received the order.',
+            title: isBooking ? `${so.sellerOrderNumber}: service confirmed by the buyer` : `${so.sellerOrderNumber}: received by the buyer`,
+            body: isBooking ? 'The buyer confirmed the service is done. Your payout is released.' : 'The buyer confirmed they received the order.',
             data: { screen: 'sale', sellerOrderId: so.id, orderId: so.orderId },
           }
         : {
             type: 'order.status',
             title: `${so.sellerOrderNumber}: ${label}`,
             body:
-              so.status === 'ready_for_pickup'
-                ? 'Your order is ready. Collect it from the pickup location shown in your order.'
-                : so.status === 'delivered' || so.status === 'collected'
-                  ? 'If something is wrong, report it in the app before the claim window ends.'
-                  : (last && last.note) || `Your order is now "${label}".`,
+              isBooking && so.status === 'delivered'
+                ? 'The provider marked the service as done. Confirm it in the app, or report a problem within 3 days.'
+                : so.status === 'ready_for_pickup'
+                  ? 'Your order is ready. Collect it from the pickup location shown in your order.'
+                  : so.status === 'delivered' || so.status === 'collected'
+                    ? 'If something is wrong, report it in the app before the claim window ends.'
+                    : (last && last.note) || `Your ${what} is now "${label}".`,
             data: { screen: 'order', orderId: so.orderId, sellerOrderId: so.id },
           }
     );
@@ -337,13 +346,16 @@ function sellerOrderStatusChanged(sellerOrderId) {
       name: dirs.get(toUserId) ? dirs.get(toUserId).display_name : '',
       userType: user.userType,
       subject: `${so.sellerOrderNumber}: ${label}`,
-      title: `Order ${label}`,
+      title: `${isBooking ? 'Booking' : 'Order'} ${label}`,
       lines: byBuyer
-        ? [`The buyer confirmed they received order ${so.sellerOrderNumber}.`]
+        ? [isBooking ? `The buyer confirmed the service for booking ${so.sellerOrderNumber} is done.` : `The buyer confirmed they received order ${so.sellerOrderNumber}.`]
         : [
-            `Your order ${so.sellerOrderNumber} is now "${label}".`,
+            `Your ${what} ${so.sellerOrderNumber} is now "${label}".`,
+            ...(isBooking && so.status === 'delivered'
+              ? ['Please confirm the service in the app. If something went wrong, report a problem within 3 days.']
+              : []),
             ...(so.status === 'ready_for_pickup' ? ['You can collect it from the pickup location shown in your order.'] : []),
-            ...(so.status === 'delivered' || so.status === 'collected'
+            ...(!isBooking && (so.status === 'delivered' || so.status === 'collected')
               ? ['If something is wrong with your order, report it in the app before the claim window ends.']
               : []),
           ],
