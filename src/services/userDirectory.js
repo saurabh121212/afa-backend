@@ -241,4 +241,16 @@ async function findUserIdsForAudience({ statuses = [], userTypes = [], regionIds
   return rows.map((r) => Number(r.id));
 }
 
-module.exports = { findUsers, countUsers, findOne, findMany, findUserIdsByName, findUserIdsForAudience, findDocuments, SORTS };
+// Admin dashboard: users per type and region (+ status)  -> [{ user_type, status, region_id, region_name, total }]
+async function countByTypeAndRegion() {
+  const rows = await sequelize.query(
+    `SELECT u.user_type, u.status, d.region_id, r.name AS region_name, COUNT(*) AS total
+       ${FROM_SQL}
+      WHERE u.deleted_at IS NULL
+      GROUP BY u.user_type, u.status, d.region_id, r.name`,
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  return rows.map((r) => ({ ...r, total: Number(r.total) }));
+}
+
+module.exports = { findUsers, countUsers, findOne, findMany, findUserIdsByName, findUserIdsForAudience, countByTypeAndRegion, findDocuments, SORTS };
