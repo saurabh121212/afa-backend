@@ -14,6 +14,7 @@ const ApiError = require('../utils/ApiError');
 const { getPagination, paginationMeta } = require('../utils/pagination');
 const { toCsvLine } = require('../utils/csv');
 const emailService = require('./email.service');
+const notifications = require('./notification.service');
 const { CONTACT_SENDER_TYPES, CONTACT_SUBJECTS, CONTACT_STATUSES } = require('../config/contact');
 
 const reference = (id) => `AFA-CNT-${String(id).padStart(6, '0')}`;
@@ -81,6 +82,12 @@ async function submit(data, meta = {}) {
   });
 
   const subjectLabel = CONTACT_SUBJECTS[msg.subject];
+  notifications.toAdmins({
+    type: 'admin.contact',
+    title: `New Contact Us message: ${subjectLabel || msg.subject}`,
+    body: `${msg.fullName}: ${msg.message}`,
+    data: { screen: 'admin_contact', contactMessageId: msg.id },
+  });
   // Emails never fail the request
   emailService
     .sendContactAcknowledgementEmail({ to: msg.email, name: msg.fullName, id: msg.id, subjectLabel, message: msg.message })

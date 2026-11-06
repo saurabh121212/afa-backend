@@ -24,6 +24,7 @@ const fs = require('fs/promises');
 const { Op } = require('sequelize');
 const config = require('../config');
 const models = require('../models');
+const notifications = require('./notification.service');
 const ApiError = require('../utils/ApiError');
 const { getPagination, paginationMeta } = require('../utils/pagination');
 const { fileMatchesKind, kindForMimeType, formatLabels } = require('../utils/fileTypes');
@@ -517,6 +518,16 @@ async function sendForReview(user, listing, transaction) {
   );
 }
 
+// Admin bell: a listing is waiting for review (called after the change is saved)
+function alertReview(listing, reReview = false) {
+  notifications.toAdmins({
+    type: 'admin.listing_review',
+    title: reReview ? `Changed listing to review again: ${listing.name}` : `New listing to review: ${listing.name}`,
+    body: reReview ? 'A live listing was edited and needs to be checked again.' : 'A seller sent a listing for approval.',
+    data: { screen: 'admin_listing', listingId: listing.id },
+  });
+}
+
 // ---------- POST /me/listings ----------
 async function create(user, data, rawBody = {}) {
   const kind = kindOf(user);
@@ -535,13 +546,14 @@ async function create(user, data, rawBody = {}) {
     }
   }
   const fresh = await findOwn(user, listing.id);
+  if (fresh.status === S.PENDING) alertReview(fresh);
   return { listing: toSeller(fresh), sentForReview: fresh.status === S.PENDING, submitErrors: submitError ? submitError.errors : [] };
 }
 
 // ---------- PUT /me/listings/:id ----------
 async function update(user, id, data, rawBody = {}) {
   const kind = kindOf(user);
-  return sequelize.transaction(async (transaction) => {
+  const out = await sequelize.transaction(async (transaction) => {
     const listing = await findOwn(user, id, { transaction });
     if (listing.status === S.DISABLED) {
       throw new ApiError(409, 'This listing was disabled by the AFA admin and cannot be edited.', { code: 'LISTING_DISABLED' });
@@ -560,18 +572,23 @@ async function update(user, id, data, rawBody = {}) {
     await listing.update(values, { transaction });
 
     let reReview = false;
+    let sent = false;
     if (data.submit === true && [S.DRAFT, S.REJECTED, S.FLAGGED].includes(listing.status)) {
       await sendForReview(user, listing, transaction);
+      sent = true;
     } else if (contentChanged && [S.ACTIVE, S.PAUSED].includes(listing.status)) {
       await sendForReview(user, listing, transaction); // a changed live listing is checked again
       reReview = true;
+      sent = true;
     }
     // A new category may end (or start) a VAT hold
     if (changed.includes('categoryId') || changed.includes('subCategoryId')) {
       await vatHold.forListing(listing.id, { transaction });
     }
-    return { listing: toSeller(await findOwn(user, id, { transaction })), reReview };
+    return { listing: toSeller(await findOwn(user, id, { transaction })), reReview, sent, name: listing.name };
   });
+  if (out.sent) alertReview({ id, name: out.name }, out.reReview);
+  return { listing: out.listing, reReview: out.reReview };
 }
 
 // ---------- POST /me/listings/:id/submit ----------
@@ -588,7 +605,10 @@ async function submit(user, id) {
       });
     }
     await sendForReview(user, listing, transaction);
-    return toSeller(await findOwn(user, id, { transaction }));
+    return { shaped: toSeller(await findOwn(user, id, { transaction })), name: listing.name };
+  }).then((out) => {
+    alertReview({ id, name: out.name });
+    return out.shaped;
   });
 }
 

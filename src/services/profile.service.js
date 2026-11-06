@@ -18,6 +18,7 @@ const { USER_STATUS, USER_STATUS_LABELS, USER_TYPE_LABELS } = require('../utils/
 const locationService = require('./location.service');
 const directory = require('./userDirectory');
 const emailService = require('./email.service');
+const notifications = require('./notification.service');
 const paymentMethodService = require('./paymentMethod.service');
 const { getHandler } = require('./userTypes.registry');
 const { loadUserWithProfile } = require('./registration.service');
@@ -310,7 +311,13 @@ async function changePassword(userId, { currentPassword, newPassword }, currentT
     { expiresIn }
   );
 
-  // Security email (a failed email never fails the change)
+  // Security email + notification (a failure never fails the change)
+  notifications.toUser(user.id, {
+    type: 'account.password_changed',
+    title: 'Your password was changed',
+    body: 'If this was not you, reset your password now and contact the AFA team.',
+    data: { screen: 'account' },
+  });
   const handler = getHandler(user.userType);
   Promise.resolve(handler ? handler.getDisplayName(user.id) : '')
     .then((name) => emailService.sendPasswordChangedEmail({ to: user.email, name, userType: user.userType }))

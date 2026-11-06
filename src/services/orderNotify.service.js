@@ -9,11 +9,13 @@
 //   paidAfterCancel          -> admin: money received for a cancelled order (refund needed)
 //   orderCancelled           -> buyer: order cancelled (not paid in time / by the buyer)
 //   sellerOrderStatusChanged -> buyer: status update; seller: when the buyer confirmed receipt
+// Each of these also creates an in-app notification + push (admin ones: every admin's bell).
 const models = require('../models');
 const emailService = require('./email.service');
 const directory = require('./userDirectory');
 const settings = require('./setting.service');
 const invoices = require('./invoice.service');
+const notify = require('./notification.service'); // in-app + push for every email below
 const { num, money, itemShape } = require('./orderShared');
 const { ORDER_STATUS, SELLER_ORDER_STATUS_LABELS } = require('../config/orders');
 
@@ -85,6 +87,12 @@ function orderPlaced(orderId) {
     if (!data) return;
     const { order, buyer, dirs } = data;
     const isBank = order.paymentMethod === 'bank_transfer';
+    await notify.toUser(order.userId, {
+      type: 'order.placed',
+      title: `Order ${order.orderNumber} placed`,
+      body: `${isBank ? 'Pay by bank transfer and upload your proof' : 'Complete the online payment'} of ${money(order.total)} before ${fmtDate(order.paymentDeadline)}.`,
+      data: { screen: 'order', orderId: order.id },
+    });
     await emailService.sendOrderEmail({
       to: buyer.email,
       name: dirs.get(order.userId) ? dirs.get(order.userId).display_name : '',
@@ -109,6 +117,12 @@ function orderPaid(orderId) {
     const data = await loadForEmail(orderId);
     if (!data) return;
     const { order, buyer, dirs } = data;
+    await notify.toUser(order.userId, {
+      type: 'payment.received',
+      title: `Payment received: ${money(order.total)}`,
+      body: `${order.orderNumber} is paid. The seller(s) will now prepare your order. Your receipt is ready.`,
+      data: { screen: 'order', orderId: order.id },
+    });
     await emailService.sendOrderEmail({
       to: buyer.email,
       name: dirs.get(order.userId) ? dirs.get(order.userId).display_name : '',
@@ -133,6 +147,12 @@ function orderPaid(orderId) {
         const seller = sellerById.get(so.sellerId);
         if (!seller) return null;
         const items = (so.items || []).map(itemShape);
+        notify.toUser(so.sellerId, {
+          type: 'order.new',
+          title: `New order ${so.sellerOrderNumber}: ${money(so.total)}`,
+          body: `${buyerName} ordered (${so.fulfilment === 'pickup' ? 'Pickup' : 'Delivery'}). Confirm it before ${fmtDate(so.confirmBy)}.`,
+          data: { screen: 'sale', sellerOrderId: so.id, orderId: order.id },
+        });
         return background(`new order seller ${so.sellerId}`, async () =>
           emailService.sendOrderEmail({
             to: seller.email,
@@ -167,6 +187,12 @@ function paymentRejected(orderId, paymentId) {
     const payment = await Payment.findByPk(paymentId);
     if (!data || !payment) return;
     const { order, buyer, dirs } = data;
+    await notify.toUser(order.userId, {
+      type: 'payment.rejected',
+      title: `Payment not confirmed: ${order.orderNumber}`,
+      body: `${payment.rejectionReason || 'Your proof of payment was not accepted.'} Upload a new proof before ${fmtDate(order.paymentDeadline)}.`,
+      data: { screen: 'order', orderId: order.id },
+    });
     await emailService.sendOrderEmail({
       to: buyer.email,
       name: dirs.get(order.userId) ? dirs.get(order.userId).display_name : '',
@@ -187,6 +213,12 @@ function onlinePaymentFailed(orderId) {
     const data = await loadForEmail(orderId);
     if (!data || data.order.status !== ORDER_STATUS.AWAITING_PAYMENT) return;
     const { order, buyer, dirs } = data;
+    await notify.toUser(order.userId, {
+      type: 'payment.failed',
+      title: `Payment failed: ${order.orderNumber}`,
+      body: `No money was taken. Try again or pay by bank transfer before ${fmtDate(order.paymentDeadline)}.`,
+      data: { screen: 'order', orderId: order.id },
+    });
     await emailService.sendOrderEmail({
       to: buyer.email,
       name: dirs.get(order.userId) ? dirs.get(order.userId).display_name : '',
@@ -206,6 +238,12 @@ function orderCancelled(orderId) {
     const data = await loadForEmail(orderId);
     if (!data) return;
     const { order, buyer, dirs } = data;
+    await notify.toUser(order.userId, {
+      type: 'order.cancelled',
+      title: `Order ${order.orderNumber} cancelled`,
+      body: order.cancelledBy === 'system' ? 'It was not paid in time. No money was taken.' : 'Your order has been cancelled.',
+      data: { screen: 'order', orderId: order.id },
+    });
     await emailService.sendOrderEmail({
       to: buyer.email,
       name: dirs.get(order.userId) ? dirs.get(order.userId).display_name : '',
@@ -227,7 +265,14 @@ function orderCancelled(orderId) {
 function proofUploaded(orderId, paymentId) {
   return background(`proof ${orderId}`, async () => {
     const [to, order, payment] = await Promise.all([adminEmail(), Order.findByPk(orderId), Payment.findByPk(paymentId)]);
-    if (!to || !order || !payment) return;
+    if (!order || !payment) return;
+    await notify.toAdmins({
+      type: 'admin.payment_proof',
+      title: `Bank transfer to check: ${order.orderNumber}`,
+      body: `Proof for ${money(payment.amountPaid)} (order total ${money(order.total)})${payment.bankReference ? `, ref ${payment.bankReference}` : ''}.`,
+      data: { screen: 'admin_payment', paymentId: payment.id, orderId: order.id },
+    });
+    if (!to) return;
     const dir = (await directory.findMany([order.userId])).get(order.userId);
     await emailService.sendOrderEmail({
       to,
@@ -266,6 +311,27 @@ function sellerOrderStatusChanged(sellerOrderId) {
     const [user, dirs] = await Promise.all([User.findByPk(toUserId, { attributes: ['id', 'email', 'userType'] }), directory.findMany([toUserId])]);
     if (!user) return;
     const label = SELLER_ORDER_STATUS_LABELS[so.status];
+    await notify.toUser(
+      toUserId,
+      byBuyer
+        ? {
+            type: 'order.received',
+            title: `${so.sellerOrderNumber}: received by the buyer`,
+            body: 'The buyer confirmed they received the order.',
+            data: { screen: 'sale', sellerOrderId: so.id, orderId: so.orderId },
+          }
+        : {
+            type: 'order.status',
+            title: `${so.sellerOrderNumber}: ${label}`,
+            body:
+              so.status === 'ready_for_pickup'
+                ? 'Your order is ready. Collect it from the pickup location shown in your order.'
+                : so.status === 'delivered' || so.status === 'collected'
+                  ? 'If something is wrong, report it in the app before the claim window ends.'
+                  : (last && last.note) || `Your order is now "${label}".`,
+            data: { screen: 'order', orderId: so.orderId, sellerOrderId: so.id },
+          }
+    );
     await emailService.sendOrderEmail({
       to: user.email,
       name: dirs.get(toUserId) ? dirs.get(toUserId).display_name : '',

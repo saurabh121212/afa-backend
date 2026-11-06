@@ -9,8 +9,10 @@
 //       pending (new certificate while approved) -> seller: "being checked" (+ listings hidden) and admin alert
 //       none                   -> the seller did it themselves: no email
 //   afterCategoryChange(holds) -> each affected seller: which listings were hidden / shown
+// Each email also creates an in-app notification + push (the admin alert: every admin's bell).
 const { Admin, User } = require('../models');
 const emailService = require('./email.service');
+const notifications = require('./notification.service');
 const directory = require('./userDirectory');
 const { bySeller } = require('./vatHold.service');
 const { VAT_STATUS } = require('../config/vat');
@@ -35,10 +37,18 @@ async function sendStatus(change) {
   const dir = await directory.findOne(user.id);
   const name = dir ? dir.display_name : '';
   const seller = { to: user.email, name, userType: user.userType };
+  const tell = (type, title, body) => notifications.toUser(user.id, { type, title, body, data: { screen: 'vat' } });
+  const count = (list, what) => (list.length ? ` ${list.length} listing${list.length === 1 ? '' : 's'} ${what}.` : '');
 
   if (to === VAT_STATUS.APPROVED) {
+    tell('vat.approved', 'Your VAT registration is approved', `You can now list VAT items.${count(shown, 'visible again')}`);
     await emailService.sendVatStatusEmail({ ...seller, status: 'approved', shown });
   } else if (to === VAT_STATUS.REJECTED) {
+    if (from === VAT_STATUS.APPROVED) {
+      tell('vat.removed', 'Your VAT registration was removed', `${user.vatStatusReason || ''}${count(hidden, 'hidden')}`.trim());
+    } else {
+      tell('vat.rejected', 'Your VAT registration was not approved', user.vatStatusReason || 'Open VAT registration in the app for details.');
+    }
     await emailService.sendVatStatusEmail({
       ...seller,
       status: from === VAT_STATUS.APPROVED ? 'removed' : 'rejected',
@@ -48,8 +58,15 @@ async function sendStatus(change) {
   } else if (to === VAT_STATUS.PENDING) {
     const newCertificate = from === VAT_STATUS.APPROVED || from === VAT_STATUS.REJECTED;
     if (from === VAT_STATUS.APPROVED) {
+      tell('vat.review_again', 'Your new VAT certificate is being checked', `VAT items are hidden until it is approved.${count(hidden, 'hidden')}`);
       await emailService.sendVatStatusEmail({ ...seller, status: 'review_again', hidden });
     }
+    notifications.toAdmins({
+      type: 'admin.vat_request',
+      title: `VAT registration to review: ${name || user.email}`,
+      body: newCertificate ? 'A new VAT certificate was uploaded.' : 'A seller asked to be registered for VAT.',
+      data: { screen: 'admin_vat', userId: user.id },
+    });
     const to_ = await adminEmail();
     if (to_) {
       await emailService.sendVatRequestAdminEmail({
@@ -82,6 +99,17 @@ async function sendCategory(holds) {
     users.map((u) => {
       const group = groups.get(u.id);
       const dir = dirs.get(u.id);
+      notifications.toUser(u.id, {
+        type: 'vat.listings_changed',
+        title: 'Some of your listings changed visibility',
+        body: [
+          group.hidden.length ? `${group.hidden.length} hidden (VAT now applies to their category)` : '',
+          group.shown.length ? `${group.shown.length} visible again` : '',
+        ]
+          .filter(Boolean)
+          .join(', '),
+        data: { screen: 'my_listings' },
+      });
       return background(
         `category change, seller ${u.id}`,
         emailService.sendVatListingsEmail({

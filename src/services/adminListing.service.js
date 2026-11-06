@@ -16,6 +16,7 @@ const { USER_STATUS_LABELS } = require('../utils/constants');
 const { LISTING_STATUS, LISTING_STATUS_LABELS } = require('../config/listingOptions');
 const directory = require('./userDirectory');
 const emailService = require('./email.service');
+const notifications = require('./notification.service');
 const vatHold = require('./vatHold.service');
 const { baseShape, missingForReview } = require('./listing.service');
 const { sellerShape } = require('./marketplace.service');
@@ -217,7 +218,13 @@ async function changeStatus(id, action, adminId, { reason } = {}) {
     return listing;
   });
 
-  // Tell the seller (a failed email never fails the action)
+  // Tell the seller: notification + push, and email (a failure never fails the action)
+  notifications.toUser(result.userId, {
+    type: 'listing.status',
+    title: `Your listing was ${rule.label}: ${result.name}`,
+    body: reason || (rule.to === S.ACTIVE ? 'It is now visible on the marketplace.' : 'Open the listing in the app for details.'),
+    data: { screen: 'listing', listingId: result.id, status: rule.to },
+  });
   if (result.seller) {
     directory
       .findOne(result.userId)

@@ -19,6 +19,15 @@ const adminVatService = require('./adminVat.service');
 const directory = require('./userDirectory');
 const documentService = require('./document.service');
 const emailService = require('./email.service');
+const notifications = require('./notification.service');
+
+// In-app notification + push for each account email
+const ACCOUNT_NOTICES = {
+  sendAccountApprovedEmail: () => ({ type: 'account.approved', title: 'Your AFA account is approved', body: 'Welcome to AFA! You can now use every feature of your account.' }),
+  sendAccountRejectedEmail: ({ reason }) => ({ type: 'account.rejected', title: 'Your registration was not approved', body: reason || 'Please contact the AFA team for details.' }),
+  sendAccountSuspendedEmail: ({ reason }) => ({ type: 'account.suspended', title: 'Your AFA account is suspended', body: reason || 'Please contact the AFA team.' }),
+  sendAccountReactivatedEmail: () => ({ type: 'account.reactivated', title: 'Your AFA account is active again', body: 'You can use your account again.' }),
+};
 const { loadUserWithProfile } = require('./registration.service');
 const paymentMethodService = require('./paymentMethod.service');
 
@@ -252,6 +261,8 @@ async function changeStatus(id, action, adminId, apply) {
 
 // Name for emails (fire-and-forget: a failed email never fails the action)
 function notify(user, sendFn, extra = {}) {
+  const notice = Object.entries(ACCOUNT_NOTICES).find(([name]) => emailService[name] === sendFn);
+  if (notice) notifications.toUser(user.id, { ...notice[1](extra), data: { screen: 'account' } });
   directory
     .findOne(user.id)
     .then((dir) => sendFn({ to: user.email, name: dir ? dir.display_name : '', userType: user.userType, ...extra }))

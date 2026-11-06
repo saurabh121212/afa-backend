@@ -213,4 +213,32 @@ async function findDocuments(filters = {}, { sort = 'oldest', limit, offset = 0 
   return { rows, total: Number(total) };
 }
 
-module.exports = { findUsers, countUsers, findOne, findMany, findUserIdsByName, findDocuments, SORTS };
+// User ids for a notification audience (admin advisories / announcements).
+//   { statuses: [...], userTypes?: [...], regionIds?: [...], userIds?: [...] }  empty list = any
+async function findUserIdsForAudience({ statuses = [], userTypes = [], regionIds = [], userIds = [] } = {}) {
+  const where = ['u.deleted_at IS NULL'];
+  const params = {};
+  if (statuses.length) {
+    where.push('u.status IN (:statuses)');
+    params.statuses = statuses;
+  }
+  if (userTypes.length) {
+    where.push('u.user_type IN (:userTypes)');
+    params.userTypes = userTypes;
+  }
+  if (regionIds.length) {
+    where.push('d.region_id IN (:regionIds)');
+    params.regionIds = regionIds;
+  }
+  if (userIds.length) {
+    where.push('u.id IN (:userIds)');
+    params.userIds = userIds;
+  }
+  const rows = await sequelize.query(`SELECT u.id ${FROM_SQL} WHERE ${where.join(' AND ')} ORDER BY u.id`, {
+    replacements: params,
+    type: sequelize.QueryTypes.SELECT,
+  });
+  return rows.map((r) => Number(r.id));
+}
+
+module.exports = { findUsers, countUsers, findOne, findMany, findUserIdsByName, findUserIdsForAudience, findDocuments, SORTS };

@@ -9,8 +9,12 @@
 //   refundCreated          -> buyer + AFA
 //   bankDetailsAdded       -> AFA: a refund is ready to pay
 //   refundPaid / refundFailed -> buyer
+//
+// Every email also creates an in-app notification + push (message.notice = { type, data, body? }).
+// The admin emails also go to every admin's bell.
 const models = require('../models');
 const emailService = require('./email.service');
+const notify = require('./notification.service');
 const directory = require('./userDirectory');
 const { money } = require('./orderShared');
 const { CLAIM_REASONS, CLAIM_STATUS_LABELS, REFUND_SOURCES } = require('../config/refunds');
@@ -30,8 +34,17 @@ async function adminEmail() {
   return admin ? admin.email : null;
 }
 
-// Email one user (buyer / seller)
-async function toUser(userId, message) {
+// In-app notification from an email message: its title + the first line (or notice.body)
+const noticeOf = ({ notice, title, lines = [] }) => ({
+  type: notice.type,
+  title: notice.title || title,
+  body: notice.body || lines.filter(Boolean)[0] || title,
+  data: notice.data || {},
+});
+
+// Email one user (buyer / seller) + their notification
+async function toUser(userId, { notice, ...message }) {
+  if (notice) await notify.toUser(userId, noticeOf({ notice, ...message }));
   const [user, dirs] = await Promise.all([User.findByPk(userId, { attributes: ['id', 'email', 'userType'] }), directory.findMany([userId])]);
   if (!user) return;
   await emailService.sendOrderEmail({
@@ -42,10 +55,16 @@ async function toUser(userId, message) {
   });
 }
 
-async function toAdmin(message) {
+// Email the AFA admin + every admin's bell
+async function toAdmin({ notice, ...message }) {
+  if (notice) await notify.toAdmins(noticeOf({ notice, ...message }));
   const to = await adminEmail();
   if (to) await emailService.sendOrderEmail({ to, ...message });
 }
+
+// Where each notification takes the user in the app
+const orderData = (so) => ({ screen: 'order', orderId: so.orderId, sellerOrderId: so.id });
+const saleData = (so) => ({ screen: 'sale', sellerOrderId: so.id, orderId: so.orderId });
 
 const refundLine = (refund) =>
   refund
@@ -56,6 +75,12 @@ const refundLine = (refund) =>
 
 async function adminRefundAlert(refund, extra = '') {
   await toAdmin({
+    notice: {
+      type: 'admin.refund',
+      title: `Refund to pay: ${refund.refundNumber}`,
+      body: `${money(refund.amount)} - ${REFUND_SOURCES[refund.source]}${refund.bankDetails ? '' : ' (waiting for bank details)'}`,
+      data: { screen: 'admin_refund', refundId: refund.id, orderId: refund.orderId },
+    },
     subject: `Refund to pay: ${refund.refundNumber} (${money(refund.amount)})`,
     title: 'A refund is due',
     lines: [
@@ -77,12 +102,24 @@ function sellerOrderCancelled(sellerOrderId, refundId = null) {
     const sellerBy = { buyer: 'at the buyer\'s request', seller: 'by you', admin: 'by the AFA team', system: 'because it was not confirmed in time' }[so.cancelledBy] || '';
 
     await toUser(order.userId, {
+      notice: {
+        type: 'cancel.order_cancelled',
+        title: `${so.sellerOrderNumber} cancelled`,
+        body: `Cancelled ${by}.${refund ? ` Refund of ${money(refund.amount)} on the way${refund.bankDetails ? '' : ': add your bank details'}.` : ''}`,
+        data: orderData(so),
+      },
       subject: `${so.sellerOrderNumber} cancelled`,
       title: 'Order cancelled',
       lines: [`Your order ${so.sellerOrderNumber} was cancelled ${by}.`, refundLine(refund)].filter(Boolean),
       box: so.cancelReason ? { title: 'Reason', text: so.cancelReason } : null,
     });
     await toUser(so.sellerId, {
+      notice: {
+        type: 'cancel.order_cancelled',
+        title: `${so.sellerOrderNumber} cancelled`,
+        body: `Cancelled ${sellerBy}. Please do not send the goods.`,
+        data: saleData(so),
+      },
       subject: `${so.sellerOrderNumber} cancelled`,
       title: 'Order cancelled',
       lines: [
@@ -102,6 +139,12 @@ function cancelRequested(requestId) {
     if (!r) return;
     const so = await SellerOrder.findByPk(r.sellerOrderId);
     await toUser(r.sellerId, {
+      notice: {
+        type: 'cancel.request',
+        title: `The buyer wants to cancel ${so.sellerOrderNumber}`,
+        body: `Accept or decline before ${fmtDate(r.respondBy)}. Reason: ${r.reason}`,
+        data: saleData(so),
+      },
       subject: `Cancellation request for ${so.sellerOrderNumber}`,
       title: 'The buyer wants to cancel',
       lines: [
@@ -121,6 +164,7 @@ function cancelRequestAnswered(requestId) {
     const so = await SellerOrder.findByPk(r.sellerOrderId);
     if (r.status === 'withdrawn') {
       await toUser(r.sellerId, {
+        notice: { type: 'cancel.request_answered', title: `Cancellation request withdrawn: ${so.sellerOrderNumber}`, data: saleData(so) },
         subject: `Cancellation request withdrawn: ${so.sellerOrderNumber}`,
         title: 'Request withdrawn',
         lines: [`The buyer withdrew the cancellation request for ${so.sellerOrderNumber}. Please continue with the order.`],
@@ -130,6 +174,7 @@ function cancelRequestAnswered(requestId) {
     // accepted / approved: the cancellation email already went out
     if (r.status === 'declined' || r.status === 'rejected') {
       await toUser(r.buyerId, {
+        notice: { type: 'cancel.request_answered', title: `${so.sellerOrderNumber}: your order will go ahead`, data: orderData(so) },
         subject: `Cancellation request for ${so.sellerOrderNumber}`,
         title: 'Your order will go ahead',
         lines: [
@@ -140,6 +185,7 @@ function cancelRequestAnswered(requestId) {
       });
       if (r.status === 'rejected') {
         await toUser(r.sellerId, {
+          notice: { type: 'cancel.request_answered', title: `${so.sellerOrderNumber}: please continue with the order`, data: saleData(so) },
           subject: `Cancellation request for ${so.sellerOrderNumber}`,
           title: 'Please continue with the order',
           lines: [`The AFA team did not approve the buyer's request to cancel ${so.sellerOrderNumber}. Please continue with the order.`],
@@ -155,12 +201,19 @@ function cancelRequestEscalated(requestId) {
     if (!r) return;
     const so = await SellerOrder.findByPk(r.sellerOrderId);
     await toAdmin({
+      notice: {
+        type: 'admin.cancel_request',
+        title: `Cancellation request to decide: ${so.sellerOrderNumber}`,
+        body: `The seller did not answer. Buyer's reason: ${r.reason}`,
+        data: { screen: 'admin_cancel_request', requestId: r.id, orderId: r.orderId },
+      },
       subject: `Cancellation request to decide: ${so.sellerOrderNumber}`,
       title: 'The seller did not answer a cancellation request',
       lines: [`Decide in the AFA admin panel: Orders > Cancellation Requests.`],
       box: { title: 'Buyer\'s reason', text: r.reason },
     });
     await toUser(r.buyerId, {
+      notice: { type: 'cancel.request_escalated', title: `${so.sellerOrderNumber}: your request is with the AFA team`, data: orderData(so) },
       subject: `Cancellation request for ${so.sellerOrderNumber}`,
       title: 'Your request is with the AFA team',
       lines: [`The seller did not answer your request to cancel ${so.sellerOrderNumber} in time, so the AFA team will decide.`],
@@ -177,10 +230,14 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
     const ref = `${c.claimNumber} (${so.sellerOrderNumber})`;
     const subject = (text) => `${c.claimNumber}: ${text}`;
     const status = CLAIM_STATUS_LABELS[c.status];
+    // buyer -> their claim screen, seller -> My Sales > Claims
+    const claimData = (uid) => (uid === c.buyerId ? { screen: 'claim', claimId: c.id, orderId: c.orderId } : { screen: 'sale_claim', claimId: c.id, sellerOrderId: c.sellerOrderId });
+    const claimNotice = (uid, title, body = null, type = 'claim.update') => ({ type, title: `${c.claimNumber}: ${title}`, ...(body ? { body } : {}), data: claimData(uid) });
 
     switch (event) {
       case 'opened':
         await toUser(c.sellerId, {
+          notice: claimNotice(c.sellerId, 'a buyer reported a problem', `"${CLAIM_REASONS[c.reason]}" on ${so.sellerOrderNumber}. Reply before ${fmtDate(c.sellerRespondBy)}.`),
           subject: subject('a buyer reported a problem'),
           title: 'A buyer reported a problem',
           lines: [
@@ -193,6 +250,7 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
         break;
       case 'accepted':
         await toUser(c.buyerId, {
+          notice: claimNotice(c.buyerId, 'accepted by the seller', c.status === 'awaiting_return' ? `Refund of ${money(c.refundAmount)} after you send the item back.` : `Refund of ${money(c.refundAmount)} on the way.`),
           subject: subject('accepted by the seller'),
           title: 'The seller accepted your claim',
           lines: [
@@ -206,6 +264,7 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
         break;
       case 'rejected':
         await toUser(c.buyerId, {
+          notice: claimNotice(c.buyerId, 'rejected by the seller', `You can send it to the AFA team before ${fmtDate(c.escalateBy)}.`),
           subject: subject('rejected by the seller'),
           title: 'The seller rejected your claim',
           lines: [
@@ -217,6 +276,12 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
         break;
       case 'escalated':
         await toAdmin({
+          notice: {
+            type: 'admin.claim',
+            title: `Claim to decide: ${c.claimNumber}`,
+            body: `"${CLAIM_REASONS[c.reason]}" on ${so.sellerOrderNumber}, up to ${money(c.maxRefund)}.`,
+            data: { screen: 'admin_claim', claimId: c.id },
+          },
           subject: subject('to decide'),
           title: 'A claim needs your decision',
           lines: [`Claim ${ref}: "${CLAIM_REASONS[c.reason]}", up to ${money(c.maxRefund)}. Decide in the AFA admin panel: Claims.`],
@@ -225,6 +290,7 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
         await Promise.all(
           [from === 'buyer' ? null : c.buyerId, c.sellerId].filter(Boolean).map((uid) =>
             toUser(uid, {
+              notice: claimNotice(uid, 'with the AFA team', 'The AFA team will decide. Their decision is final.'),
               subject: subject('with the AFA team'),
               title: 'The AFA team will decide',
               lines: [`Claim ${ref} is now with the AFA team. Their decision is final.`],
@@ -237,6 +303,11 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
         await Promise.all(
           [c.buyerId, c.sellerId].map((uid) =>
             toUser(uid, {
+              notice: claimNotice(
+                uid,
+                status.toLowerCase(),
+                c.status === 'resolved' ? `Refund to the buyer: ${money(c.refundAmount)}.` : c.status === 'closed' ? 'No refund will be paid.' : 'The item must be sent back first.'
+              ),
               subject: subject(status),
               title: `Claim ${status}`,
               lines: [
@@ -253,6 +324,7 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
         break;
       case 'returned':
         await toUser(c.sellerId, {
+          notice: claimNotice(c.sellerId, 'item sent back', `Confirm when you receive it, before ${fmtDate(c.sellerRespondBy)}.`),
           subject: subject('item sent back'),
           title: 'The buyer sent the item back',
           lines: [`Please confirm in your AFA account when you receive it, before ${fmtDate(c.sellerRespondBy)}. The buyer is then refunded ${money(c.refundAmount)}.`],
@@ -261,6 +333,7 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
         break;
       case 'withdrawn':
         await toUser(c.sellerId, {
+          notice: claimNotice(c.sellerId, 'withdrawn', 'The buyer withdrew the claim. No refund is due.'),
           subject: subject('withdrawn'),
           title: 'Claim withdrawn',
           lines: [`The buyer withdrew claim ${ref}. No refund is due.`],
@@ -268,6 +341,7 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
         break;
       case 'closed':
         await toUser(c.buyerId, {
+          notice: claimNotice(c.buyerId, 'closed', c.closeReason || 'Closed without a refund.'),
           subject: subject('closed'),
           title: 'Claim closed',
           lines: [`Claim ${ref} was closed without a refund.`],
@@ -280,6 +354,7 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
         await Promise.all(
           targets.map((uid) =>
             toUser(uid, {
+              notice: claimNotice(uid, 'new message', `New message from the ${from === 'admin' ? 'AFA team' : from}.`, 'claim.message'),
               subject: subject('new message'),
               title: 'New message on a claim',
               lines: [`There is a new message from the ${from === 'admin' ? 'AFA team' : from} on claim ${ref}. Open it in the app to read and reply.`],
@@ -287,7 +362,12 @@ function claimEvent(claimId, event, { refundId = null, from = null } = {}) {
           )
         );
         if (from !== 'admin' && c.status === 'escalated') {
-          await toAdmin({ subject: subject('new message'), title: 'New message on a claim', lines: [`New message from the ${from} on claim ${ref}.`] });
+          await toAdmin({
+            notice: { type: 'admin.claim', title: `${c.claimNumber}: new message`, body: `New message from the ${from}.`, data: { screen: 'admin_claim', claimId: c.id } },
+            subject: subject('new message'),
+            title: 'New message on a claim',
+            lines: [`New message from the ${from} on claim ${ref}.`],
+          });
         }
         break;
       }
@@ -305,6 +385,7 @@ function refundCreated(refundId) {
     if (!refund) return;
     const order = await Order.findByPk(refund.orderId);
     await toUser(refund.buyerId, {
+      notice: { type: 'refund.created', title: `Refund ${refund.refundNumber}: ${money(refund.amount)}`, data: { screen: 'refund', refundId: refund.id } },
       subject: `Refund ${refund.refundNumber} for ${order.orderNumber}`,
       title: 'A refund is on the way',
       lines: [refundLine(refund)],
@@ -319,6 +400,12 @@ function bankDetailsAdded(refundId) {
     const refund = await Refund.findByPk(refundId);
     if (!refund || refund.status !== 'pending') return;
     await toAdmin({
+      notice: {
+        type: 'admin.refund',
+        title: `Refund ready to pay: ${refund.refundNumber}`,
+        body: `${money(refund.amount)}: the buyer added bank details.`,
+        data: { screen: 'admin_refund', refundId: refund.id },
+      },
       subject: `Refund ready to pay: ${refund.refundNumber}`,
       title: 'Bank details added',
       lines: [`The buyer added bank details for refund ${refund.refundNumber} (${money(refund.amount)}). Pay it in the AFA admin panel: Refunds.`],
@@ -331,6 +418,12 @@ function refundPaid(refundId) {
     const refund = await Refund.findByPk(refundId);
     if (!refund) return;
     await toUser(refund.buyerId, {
+      notice: {
+        type: 'refund.paid',
+        title: `Refund paid: ${money(refund.amount)}`,
+        body: `${refund.refundNumber} was paid into your bank account (ref ${refund.bankReference}).`,
+        data: { screen: 'refund', refundId: refund.id },
+      },
       subject: `Refund ${refund.refundNumber} paid`,
       title: 'Your refund has been paid',
       lines: [
@@ -346,6 +439,12 @@ function refundFailed(refundId) {
     const refund = await Refund.findByPk(refundId);
     if (!refund) return;
     await toUser(refund.buyerId, {
+      notice: {
+        type: 'refund.failed',
+        title: `Refund ${refund.refundNumber}: check your bank details`,
+        body: refund.failedReason || 'We could not pay your refund. Please update your bank details.',
+        data: { screen: 'refund', refundId: refund.id },
+      },
       subject: `Refund ${refund.refundNumber}: please check your bank details`,
       title: 'We could not pay your refund',
       lines: [`We could not pay your refund of ${money(refund.amount)}. Please check and update your bank details in the app (My Refunds).`],

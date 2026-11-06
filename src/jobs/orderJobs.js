@@ -7,12 +7,14 @@
 //   4. cancellation requests not answered in time -> AFA decides   -> cancellation.service.escalateRequests
 //   5. claims: no seller reply in time -> AFA; rejected and not
 //      escalated / item not returned in time -> closed             -> claim.service.runDue
+//   6. send admin advisories / announcements that are due          -> broadcast.service.sendDue
 //
 // Turn off with RUN_JOBS=false (e.g. on extra servers if the API ever runs on more than one).
 const paymentService = require('../services/payment.service');
 const sellerOrderService = require('../services/sellerOrder.service');
 const cancellationService = require('../services/cancellation.service');
 const claimService = require('../services/claim.service');
+const broadcastService = require('../services/broadcast.service');
 
 const EVERY_MS = 60 * 1000;
 let timer = null;
@@ -27,11 +29,12 @@ async function runOnce() {
     const requestsEscalated = await cancellationService.escalateRequests();
     const claimsDue = await claimService.runDue();
     const completed = await sellerOrderService.completeDue();
-    const result = { cancelled, autoCancelled, requestsEscalated, claimsEscalated: claimsDue.escalated, claimsClosed: claimsDue.closed, completed };
+    const broadcasts = await broadcastService.sendDue();
+    const result = { cancelled, autoCancelled, requestsEscalated, claimsEscalated: claimsDue.escalated, claimsClosed: claimsDue.closed, completed, broadcasts };
     if (Object.values(result).some(Boolean)) {
       console.log(
         `🕒 Order jobs: ${cancelled} unpaid cancelled, ${autoCancelled} unconfirmed cancelled, ${requestsEscalated} request(s) + ` +
-          `${claimsDue.escalated} claim(s) sent to AFA, ${claimsDue.closed} claim(s) closed, ${completed} completed`
+          `${claimsDue.escalated} claim(s) sent to AFA, ${claimsDue.closed} claim(s) closed, ${completed} completed, ${broadcasts} broadcast(s) sent`
       );
     }
     return result;

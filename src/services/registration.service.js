@@ -7,6 +7,8 @@ const { signRegistrationToken } = require('../utils/jwt');
 const { USER_STATUS, OTP_PURPOSES } = require('../utils/constants');
 const otpService = require('./otp.service');
 const emailService = require('./email.service');
+const notifications = require('./notification.service');
+const { USER_TYPE_LABELS } = require('../utils/constants');
 const { getHandler } = require('./userTypes.registry');
 
 const { User } = models;
@@ -130,11 +132,17 @@ async function submit(user, data = {}) {
     status: USER_STATUS.PENDING_APPROVAL,
   });
 
-  // A failed "thank you" email must not fail the registration
+  // A failed "thank you" email must not fail the registration. The admins get a bell notification.
   displayNameOf(user)
-    .then((name) =>
-      emailService.sendRegistrationSubmittedEmail({ to: user.email, name, userType: user.userType })
-    )
+    .then((name) => {
+      notifications.toAdmins({
+        type: 'admin.registration',
+        title: `New ${USER_TYPE_LABELS[user.userType] || user.userType} registration to review`,
+        body: `${name || user.email} submitted their registration and KYC documents.`,
+        data: { screen: 'admin_user', userId: user.id },
+      });
+      return emailService.sendRegistrationSubmittedEmail({ to: user.email, name, userType: user.userType });
+    })
     .catch((err) => console.error('Registration email failed:', err.message));
 
   return {

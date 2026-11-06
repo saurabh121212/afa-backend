@@ -95,6 +95,19 @@ const config = {
   // 64 hex characters (32 bytes). Encrypts sensitive data such as bank account numbers.
   encryptionKey: process.env.DATA_ENCRYPTION_KEY || '',
 
+  // Push notifications (Firebase Cloud Messaging, HTTP v1). Push is OFF until a service account is set.
+  //   FCM_SERVICE_ACCOUNT_FILE   -> path to the service account JSON downloaded from Firebase
+  //   FCM_SERVICE_ACCOUNT_BASE64 -> or the same JSON, base64-encoded (handy on hosting panels)
+  //   FCM_ANDROID_CHANNEL_ID     -> Android notification channel created by the app (default afa_default)
+  //   WEB_APP_URL                -> website address: web push opens <WEB_APP_URL>/notifications
+  fcm: {
+    serviceAccountFile: process.env.FCM_SERVICE_ACCOUNT_FILE || '',
+    serviceAccountBase64: process.env.FCM_SERVICE_ACCOUNT_BASE64 || '',
+    androidChannelId: process.env.FCM_ANDROID_CHANNEL_ID || 'afa_default',
+    timeoutMs: Number(process.env.FCM_TIMEOUT_MS) || 10000,
+  },
+  webAppUrl: (process.env.WEB_APP_URL || '').replace(/\/+$/, ''),
+
   corsOrigins: (process.env.CORS_ORIGINS || '')
     .split(',')
     .map((o) => o.trim())
