@@ -29,6 +29,7 @@ const {
 } = require('../config/orders');
 
 const reviews = require('./review.service');
+const creditScore = require('./creditScore.service');
 
 const { sequelize, Order, SellerOrder, OrderItem, OrderStatusHistory, User, Booking } = models;
 const cancellations = require('./cancellation.service');
@@ -60,6 +61,7 @@ async function applyStatus(so, to, actor, { note = null } = {}, transaction) {
   const from = so.status;
   await so.update(values, { transaction });
   await recordHistory({ orderId: so.orderId, sellerOrderId: so.id, from, to, actor, note }, transaction);
+  if (to === SO.COMPLETED) creditScore.refreshSoon(so.sellerId, 'order_completed', transaction); // Sales part (after commit)
 }
 
 // ---------- seller: list / stats / details ----------

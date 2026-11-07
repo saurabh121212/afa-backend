@@ -9,6 +9,10 @@
 //   countsForKyc     -> (optional) false = NOT part of the account check: it is not counted in
 //                       "uploaded X of Y", "missing" or "Ready for approval".
 //                       Used for the VAT certificate, which only VAT-registered sellers have.
+//   hasExpiry        -> (optional) true = the user must give an expiry date (expiresAt, YYYY-MM-DD) when
+//                       uploading; the admin can correct it when approving. Used for insurance.
+//   creditScore      -> (optional) 'insurance' = this document gives the Insurance part of the credit score
+//                       while it is approved and not expired (see config/creditScore.js)
 //
 // When Trader / Logistics / FI registration is built, add their list here.
 
@@ -24,6 +28,18 @@ const VAT_CERTIFICATE = {
   countsForKyc: false,
 };
 const VAT_CERTIFICATE_TYPE = 'vat_certificate';
+
+// Insurance documents: optional, not part of the account check, give 20 credit-score points while valid
+const insurance = (label, description) => ({
+  label,
+  description,
+  formats: ['jpg', 'png', 'pdf'],
+  maxSizeMB: 5,
+  required: false,
+  countsForKyc: false,
+  hasExpiry: true,
+  creditScore: 'insurance',
+});
 
 const DOCUMENT_TYPES = {
   farmer: {
@@ -57,6 +73,10 @@ const DOCUMENT_TYPES = {
       maxSizeMB: 2,
       required: false,
     },
+    crop_insurance: insurance(
+      'Crop Insurance Certificate',
+      'A valid insurance policy or certificate covering any of your crops (with the expiry date)'
+    ),
     [VAT_CERTIFICATE_TYPE]: VAT_CERTIFICATE,
   },
 
@@ -128,6 +148,10 @@ const DOCUMENT_TYPES = {
       maxSizeMB: 5,
       required: false,
     },
+    business_insurance: insurance(
+      'Business / Stock Insurance Certificate',
+      'A valid insurance policy or certificate covering your business or stock (with the expiry date)'
+    ),
     [VAT_CERTIFICATE_TYPE]: VAT_CERTIFICATE,
   },
   logistics: {
@@ -161,10 +185,12 @@ const DOCUMENT_TYPES = {
     },
     vehicle_insurance_roadworthy: {
       label: 'Vehicle Insurance & Roadworthy Certificate',
-      description: 'Valid insurance and roadworthy certificate for vehicles used to provide transport services',
+      description: 'Valid insurance and roadworthy certificate for vehicles used to provide transport services (with the insurance expiry date)',
       formats: ['jpg', 'png', 'pdf'],
       maxSizeMB: 5,
       required: false,
+      hasExpiry: true, // still part of the account check (unlike the farmer / trader insurance)
+      creditScore: 'insurance',
     },
     [VAT_CERTIFICATE_TYPE]: VAT_CERTIFICATE,
   },
@@ -224,8 +250,11 @@ const notAvailableFor = (userType, subtype) =>
     .filter(([, rules]) => !isAvailableFor(rules, subtype))
     .map(([documentType]) => documentType);
 
-// Is this document part of the account (KYC) check? (false for the VAT certificate)
+// Is this document part of the account (KYC) check? (false for the VAT certificate and farmer / trader insurance)
 const countsForKyc = (rules) => rules.countsForKyc !== false;
+
+// Does this document need an expiry date? (insurance)
+const hasExpiry = (rules) => Boolean(rules && rules.hasExpiry);
 
 module.exports = {
   getDocumentTypes,
@@ -233,5 +262,6 @@ module.exports = {
   isAvailableFor,
   notAvailableFor,
   countsForKyc,
+  hasExpiry,
   VAT_CERTIFICATE_TYPE,
 };

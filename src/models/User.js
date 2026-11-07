@@ -102,6 +102,7 @@ module.exports = (sequelize, DataTypes) => {
   );
 
   User.associate = (models) => {
+    User.hasOne(models.CreditScore, { as: 'creditScore', foreignKey: 'userId' });
     User.hasOne(models.FarmerProfile, { as: 'farmerProfile', foreignKey: 'userId' });
     User.hasOne(models.BuyerProfile, { as: 'buyerProfile', foreignKey: 'userId' });
     User.hasOne(models.TraderProfile, { as: 'traderProfile', foreignKey: 'userId' });

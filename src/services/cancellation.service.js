@@ -36,6 +36,7 @@ const {
 } = require('../config/refunds');
 
 const { buyerCancelMode } = require('../config/bookings');
+const creditScore = require('./creditScore.service');
 
 const { sequelize, Order, SellerOrder, OrderItem, CancellationRequest, Claim, ClaimMessage, Booking } = models;
 const SO = SELLER_ORDER_STATUS;
@@ -50,6 +51,8 @@ const requestNotFound = () => new ApiError(404, 'Cancellation request not found'
 //   actor { type, id }, reason, source (refund source), refundAmount (null = everything left),
 //   cancelledBy (who the cancellation counts against, default actor.type), request (accepted / approved request)
 async function cancelSellerOrder(so, order, { actor, reason, source, refundAmount = null, cancelledBy = null, request = null }, transaction) {
+  // Sales part (seller / system cancellations count as failed): recalculated after the commit
+  creditScore.refreshSoon(so.sellerId, 'order_cancelled', transaction);
   const now = new Date();
   const from = so.status;
 

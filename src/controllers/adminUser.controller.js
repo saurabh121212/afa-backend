@@ -44,8 +44,8 @@ const viewDocument = asyncHandler(async (req, res, next) => {
 
 // PATCH /admin/users/:id/documents/:documentType/review
 const reviewDocument = asyncHandler(async (req, res) => {
-  const { id, documentType, status, reason } = req.validated;
-  const data = await service.reviewDocument(id, documentType, { status, reason }, adminId(req));
+  const { id, documentType, status, reason, expiresAt } = req.validated;
+  const data = await service.reviewDocument(id, documentType, { status, reason, expiresAt }, adminId(req));
   const message = data.vatStatus
     ? `Document ${status}. The seller's VAT registration is now ${data.vatStatus}.`
     : `Document ${status}`;

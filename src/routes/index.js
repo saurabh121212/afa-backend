@@ -31,6 +31,7 @@ router.use('/me/cart', require('./cart.routes')); // buyer cart (before /me)
 router.use('/me/orders', require('./order.routes')); // buyer checkout + orders (before /me)
 router.use('/me/bookings', require('./booking.routes')); // buyer service bookings (before /me)
 router.use('/me/reviews', require('./review.routes')); // buyer reviews (before /me)
+router.use('/me/credit-score', require('./creditScore.routes')); // farmers, traders, logistics (before /me)
 router.use('/me/sales', require('./sales.routes')); // seller orders received + claims (before /me)
 router.use('/me/claims', require('./claim.routes')); // buyer claims: problems after delivery (before /me)
 router.use('/me/refunds', require('./refund.routes')); // buyer refunds + refund bank account (before /me)
@@ -65,6 +66,7 @@ router.use('/admin/orders', require('./adminOrder.routes')); // Orders & Transac
 router.use('/admin/payments', require('./adminPayment.routes')); // bank transfer review queue
 router.use('/admin/claims', require('./adminClaim.routes')); // claims: decide escalated problems
 router.use('/admin/reviews', require('./adminReview.routes')); // reviews: approve held, hide, restore, reports
+router.use('/admin/credit-scores', require('./adminCreditScore.routes')); // credit scores: list, details, recalculate, export
 router.use('/admin/refunds', require('./adminRefund.routes')); // refunds to pay
 router.use('/admin/invoices', require('./adminInvoice.routes')); // invoices, receipts, credit notes
 router.use('/admin/transactions', require('./adminTransaction.routes')); // all money in / out

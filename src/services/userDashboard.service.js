@@ -14,6 +14,7 @@ const { paidIn, salesOf, performance, countBy } = require('./metrics');
 const { round2, num, money } = require('../orderShared');
 const { ORDER_STATUS_LABELS, SELLER_ORDER_STATUS_LABELS, statusLabelFor } = require('../../config/orders');
 const { todayYmd } = require('../../config/bookings');
+const creditScoreService = require('../creditScore.service');
 const { LISTING_STATUS, LISTING_STATUS_LABELS } = require('../../config/listingOptions');
 
 const { SellerOrder, Order, OrderItem, Listing, WishlistItem, Refund, Claim, Address, Notification, User, UserDocument, Booking } = models;
@@ -345,7 +346,9 @@ async function forUser(user, query = {}) {
   else if (user.userType === 'buyer') data = await buyer(user, p);
   else if (user.userType === 'logistics') data = await logistics(user, p);
   else throw new ApiError(403, 'There is no dashboard for this account type', { code: 'DASHBOARD_NOT_AVAILABLE' });
-  return { userType: user.userType, period: P.periodShape(p), generatedAt: new Date(), ...data };
+  // farmers, traders, logistics: { score, grade, gradeLabel, calculatedAt } or null (details: GET /me/credit-score)
+  const creditScore = user.userType === 'buyer' ? undefined : await creditScoreService.summaryFor(user.id, user.userType);
+  return { userType: user.userType, period: P.periodShape(p), generatedAt: new Date(), ...data, ...(creditScore === undefined ? {} : { creditScore }) };
 }
 
 module.exports = { forUser, stockState };

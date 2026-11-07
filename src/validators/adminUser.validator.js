@@ -83,6 +83,11 @@ const reviewDocument = [
     .bail()
     .isLength({ min: 3, max: 500 })
     .withMessage('Reason must be 3-500 characters'),
+  // insurance documents: the cover's end date (the user gave one; the admin can correct it)
+  body('expiresAt')
+    .optional({ values: 'falsy' })
+    .custom((v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v)
+    .withMessage('expiresAt must be a real date in YYYY-MM-DD format'),
   body('reason').optional({ values: 'falsy' }).trim(),
 ];
 

@@ -14,6 +14,7 @@ const ApiError = require('../utils/ApiError');
 const settings = require('./setting.service');
 const directory = require('./userDirectory');
 const notifications = require('./notification.service');
+const creditScore = require('./creditScore.service');
 const { getPagination, paginationMeta } = require('../utils/pagination');
 const { displayId } = require('../utils/displayId');
 const { USER_STATUS, USER_TYPE_LABELS } = require('../utils/constants');
@@ -74,6 +75,7 @@ async function recompute(sellerId, listingIds, transaction) {
   const sellerRatings = await Review.findAll({ where: { sellerId, status: S.PUBLISHED }, attributes: ['rating'], transaction });
   const s = summarize(sellerRatings.map((r) => Number(r.rating)));
   await User.update({ ratingAvg: s.average, ratingCount: s.count }, { where: { id: sellerId }, transaction });
+  creditScore.refreshSoon(sellerId, 'rating', transaction); // Rating part (after the commit)
   for (const listingId of [...new Set(listingIds)]) {
     // eslint-disable-next-line no-await-in-loop
     const ids = await listingReviewIds(listingId, transaction);
