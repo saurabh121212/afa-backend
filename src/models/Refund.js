@@ -5,7 +5,7 @@
 const { REFUND_STATUS, REFUND_SOURCES } = require('../config/refunds');
 
 module.exports = (sequelize, DataTypes) => {
-  const money = { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 };
+  const money = () => ({ type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 });
   const Refund = sequelize.define(
     'Refund',
     {
@@ -18,10 +18,10 @@ module.exports = (sequelize, DataTypes) => {
       buyerId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       source: { type: DataTypes.ENUM(...Object.keys(REFUND_SOURCES)), allowNull: false },
       reason: { type: DataTypes.STRING(500), allowNull: true },
-      amount: money,
-      itemsAmount: money,
-      deliveryAmount: money,
-      vatAmount: money,
+      amount: money(),
+      itemsAmount: money(),
+      deliveryAmount: money(),
+      vatAmount: money(),
       status: { type: DataTypes.ENUM(...Object.values(REFUND_STATUS)), allowNull: false, defaultValue: REFUND_STATUS.PENDING },
       method: { type: DataTypes.ENUM('bank_transfer'), allowNull: false, defaultValue: 'bank_transfer' },
       bankDetails: { type: DataTypes.JSON, allowNull: true },

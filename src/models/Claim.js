@@ -6,7 +6,7 @@
 const { CLAIM_STATUS, CLAIM_REASONS } = require('../config/refunds');
 
 module.exports = (sequelize, DataTypes) => {
-  const money = { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 };
+  const money = () => ({ type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 });
   const Claim = sequelize.define(
     'Claim',
     {
@@ -19,10 +19,10 @@ module.exports = (sequelize, DataTypes) => {
       reason: { type: DataTypes.ENUM(...Object.keys(CLAIM_REASONS)), allowNull: false },
       description: { type: DataTypes.STRING(1000), allowNull: false },
       status: { type: DataTypes.ENUM(...Object.values(CLAIM_STATUS)), allowNull: false, defaultValue: CLAIM_STATUS.OPEN },
-      itemsAmount: money,
-      deliveryAmount: money,
-      vatAmount: money,
-      maxRefund: money,
+      itemsAmount: money(),
+      deliveryAmount: money(),
+      vatAmount: money(),
+      maxRefund: money(),
       refundAmount: { type: DataTypes.DECIMAL(14, 2), allowNull: true },
       returnRequired: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       sellerRespondBy: { type: DataTypes.DATE, allowNull: true },
