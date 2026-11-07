@@ -53,6 +53,9 @@ module.exports = (sequelize, DataTypes) => {
       rejectionReason: { type: DataTypes.TEXT, allowNull: true },
       // Admin approval (latest status change)
       approvedAt: { type: DataTypes.DATE, allowNull: true },
+      // sellers: average of published reviews ("4.8 (42 reviews)")
+      ratingAvg: { type: DataTypes.DECIMAL(3, 2), allowNull: true },
+      ratingCount: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
       statusReason: { type: DataTypes.TEXT, allowNull: true }, // admin's message / reason
       statusChangedAt: { type: DataTypes.DATE, allowNull: true },
       statusChangedBy: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true }, // admin id

@@ -7,6 +7,7 @@ const CATEGORIES = {
   payments: 'Payments',
   refunds: 'Cancellations, Claims & Refunds',
   listings: 'My Listings',
+  reviews: 'Reviews',
   account: 'Account',
   advisories: 'Advisories',
   announcements: 'Announcements',
@@ -48,6 +49,12 @@ const TYPES = {
   'refund.created': 'refunds',
   'refund.paid': 'refunds',
   'refund.failed': 'refunds',
+  // reviews
+  'review.request': 'reviews', // buyer: rate your completed order
+  'review.new': 'reviews', // seller: a buyer reviewed you
+  'review.reply': 'reviews', // buyer: the seller replied
+  'review.published': 'reviews', // buyer: the admin approved a held review
+  'review.hidden': 'reviews', // buyer: the admin hid your review
   // admin broadcasts
   'broadcast.advisory': 'advisories',
   'broadcast.announcement': 'announcements',
@@ -60,6 +67,7 @@ const TYPES = {
   'admin.cancel_request': 'admin',
   'admin.claim': 'admin',
   'admin.refund': 'admin',
+  'admin.review': 'admin', // a review waits for approval or was reported
 };
 
 const PLATFORMS = ['android', 'ios', 'web'];

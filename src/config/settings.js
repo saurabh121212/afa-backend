@@ -220,6 +220,16 @@ const SETTINGS = {
     pattern: '^[A-Za-z0-9]{8}([A-Za-z0-9]{3})?$',
     patternMessage: 'SWIFT code must be 8 or 11 letters / digits',
   },
+
+  // Reviews & Ratings: a review whose comment has one of these words waits for the admin (not published at once)
+  review_blocked_words: {
+    label: 'Blocked Words in Reviews',
+    description: 'Comma-separated words or phrases. A review containing one of them waits for admin approval. Phone numbers and email addresses are always held too.',
+    group: 'reviews',
+    type: 'text',
+    default: 'idiot, stupid, moron, bastard, bitch, shit, fuck, asshole',
+    maxLength: 2000,
+  },
 };
 
 const SETTING_GROUPS = {
@@ -228,6 +238,7 @@ const SETTING_GROUPS = {
   refunds: 'Cancellations, Claims & Refunds',
   company: 'Company Details (Invoices)',
   bank: 'AFA Bank Account (Bank Transfer)',
+  reviews: 'Reviews & Ratings',
 };
 
 module.exports = { SETTINGS, SETTING_GROUPS };

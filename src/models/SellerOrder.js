@@ -55,6 +55,7 @@ module.exports = (sequelize, DataTypes) => {
     SellerOrder.hasMany(models.Claim, { as: 'claims', foreignKey: 'sellerOrderId' });
     SellerOrder.hasMany(models.Refund, { as: 'refunds', foreignKey: 'sellerOrderId' });
     SellerOrder.hasOne(models.Booking, { as: 'booking', foreignKey: 'sellerOrderId' });
+    SellerOrder.hasOne(models.Review, { as: 'review', foreignKey: 'sellerOrderId' });
   };
 
   return SellerOrder;

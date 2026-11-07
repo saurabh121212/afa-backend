@@ -42,7 +42,7 @@ async function seller(user, p) {
       attributes: ['id', 'status', 'total', 'refundedAmount', 'paidAt', 'confirmBy', 'confirmedAt', 'deliveredAt', 'completedAt', 'cancelledAt', 'cancelledBy', 'claimStatus', 'payoutStatus', 'payoutAmount', 'openCancelRequestId'],
     }),
     Listing.findAll({ where: { userId: user.id }, attributes: ['id', 'name', 'status', 'quantity', 'quantityUnit', 'priceUnit', 'minOrderQuantity', 'vatHold'] }),
-    User.findByPk(user.id, { attributes: ['id', 'status', 'vatStatus'] }),
+    User.findByPk(user.id, { attributes: ['id', 'status', 'vatStatus', 'ratingAvg', 'ratingCount'] }),
   ]);
   const now = sos.length ? paidIn(sos, p.from, p.to) : [];
   const before = sos.length ? paidIn(sos, p.prevFrom, p.prevTo) : [];
@@ -90,6 +90,7 @@ async function seller(user, p) {
     refunds: P.compare(refundSum(p.from, p.to), refundSum(p.prevFrom, p.prevTo)),
     payoutReleased: P.compare(released(p.from, p.to), released(p.prevFrom, p.prevTo)),
     payoutHeld: { value: payoutHeld },
+    rating: ratingCard(account), // all-time, published reviews
   };
 
   return {
@@ -209,10 +210,16 @@ async function buyer(user, p) {
   };
 }
 
+// Seller rating card: { value: 4.6, count: 12 } (value null = no reviews yet)
+const ratingCard = (account) => ({
+  value: account && account.ratingAvg !== null && account.ratingAvg !== undefined ? Number(account.ratingAvg) : null,
+  count: account ? Number(account.ratingCount || 0) : 0,
+});
+
 // ======================= LOGISTICS (service bookings) =======================
 async function logistics(user, p) {
   const [account, docs, listings, unread, sos] = await Promise.all([
-    User.findByPk(user.id, { attributes: ['id', 'status', 'approvedAt'] }),
+    User.findByPk(user.id, { attributes: ['id', 'status', 'approvedAt', 'ratingAvg', 'ratingCount'] }),
     UserDocument.findAll({ where: { userId: user.id }, attributes: ['status'] }),
     Listing.findAll({ where: { userId: user.id }, attributes: ['id', 'name', 'status', 'availability', 'priceUnit'] }),
     Notification.count({ where: { userId: user.id, readAt: null } }),
@@ -258,7 +265,7 @@ async function logistics(user, p) {
     })(),
     payoutReleased: P.compare(released(p.from, p.to), released(p.prevFrom, p.prevTo)),
     payoutHeld: { value: payoutHeld },
-    avgRating: { value: null, note: 'Ratings appear here once reviews are live' },
+    avgRating: ratingCard(account), // all-time, published reviews
   };
 
   // Next bookings to do (confirmed / new, starting today or later)

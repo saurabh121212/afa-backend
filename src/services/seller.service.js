@@ -7,6 +7,7 @@ const { displayId } = require('../utils/displayId');
 const { USER_STATUS, USER_TYPE_LABELS } = require('../utils/constants');
 const { LISTING_STATUS, SELLER_USER_TYPES } = require('../config/listingOptions');
 const directory = require('./userDirectory');
+const reviews = require('./review.service');
 
 const notFound = () => new ApiError(404, 'Seller not found', { code: 'SELLER_NOT_FOUND' });
 
@@ -54,14 +55,15 @@ async function publicDetails(user) {
 async function sellerCard(userId, { withDetails = false } = {}) {
   const user = await User.findOne({
     where: { id: userId, status: USER_STATUS.APPROVED },
-    attributes: ['id', 'userType', 'status', 'approvedAt', 'submittedAt', 'createdAt'],
+    attributes: ['id', 'userType', 'status', 'approvedAt', 'submittedAt', 'createdAt', 'ratingAvg', 'ratingCount'],
   });
   if (!user || !SELLER_USER_TYPES.includes(user.userType)) throw notFound();
 
-  const [dirMap, activeListings, details] = await Promise.all([
+  const [dirMap, activeListings, details, completed] = await Promise.all([
     directory.findMany([user.id]),
     countActiveListings(user.id),
     withDetails ? publicDetails(user) : null,
+    reviews.ordersCompleted(user.id),
   ]);
   const dir = dirMap.get(user.id) || {};
   const name = user.userType === 'farmer' ? dir.sub_name || dir.display_name : dir.display_name;
@@ -76,10 +78,9 @@ async function sellerCard(userId, { withDetails = false } = {}) {
     region: dir.region_id ? { id: dir.region_id, name: dir.region_name } : null,
     memberSince: user.approvedAt || user.submittedAt || user.createdAt, // "Member since March 2025"
     activeListings,
-    // Filled in when the Reviews and Orders modules are built
-    rating: null, // e.g. 4.8
-    reviewsCount: 0, // e.g. 42 reviews
-    ordersCompleted: 0, // e.g. 128 orders completed
+    rating: user.ratingAvg === null || user.ratingAvg === undefined ? null : Number(user.ratingAvg), // e.g. 4.8 (null = no reviews yet)
+    reviewsCount: Number(user.ratingCount || 0), // e.g. 42 reviews (published)
+    ordersCompleted: completed, // e.g. 128 orders completed
     ...(withDetails ? { details } : {}),
   };
 }

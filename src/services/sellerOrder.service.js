@@ -28,6 +28,8 @@ const {
   statusLabelFor,
 } = require('../config/orders');
 
+const reviews = require('./review.service');
+
 const { sequelize, Order, SellerOrder, OrderItem, OrderStatusHistory, User, Booking } = models;
 const cancellations = require('./cancellation.service');
 const claims = require('./claim.service');
@@ -66,6 +68,7 @@ const SELLER_VISIBLE = { paidAt: { [Op.ne]: null } }; // only paid orders reach 
 const listIncludes = () => [
   { model: OrderItem, as: 'items' },
   { model: Booking, as: 'booking' },
+  { model: models.Review, as: 'review', attributes: ['id', 'rating', 'status', 'createdAt', 'reply'] },
   { model: Order, as: 'order', attributes: ['id', 'orderNumber', 'userId', 'deliveryAddress', 'createdAt'] },
 ];
 
@@ -270,7 +273,10 @@ async function completeDue({ limit = 100 } = {}) {
       await applyStatus(so, SO.COMPLETED, { type: 'system' }, { note: 'Claim window ended' }, transaction);
       return true;
     });
-    if (done) completed += 1;
+    if (done) {
+      completed += 1;
+      reviews.requestReview(id); // "How was your order?" (never throws)
+    }
   }
   return completed;
 }

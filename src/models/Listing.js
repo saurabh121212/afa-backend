@@ -43,6 +43,9 @@ module.exports = (sequelize, DataTypes) => {
       minBooking: { type: DataTypes.DECIMAL(10, 2), allowNull: true },
       minBookingUnit: { type: DataTypes.STRING(30), allowNull: true },
       unitsAvailable: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 1 }, // services: bookable at the same time
+      // average of published reviews of orders with this listing
+      ratingAvg: { type: DataTypes.DECIMAL(3, 2), allowNull: true },
+      ratingCount: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
 
       availability: { type: DataTypes.STRING(20), allowNull: true },
       availableFrom: { type: DataTypes.DATEONLY, allowNull: true },

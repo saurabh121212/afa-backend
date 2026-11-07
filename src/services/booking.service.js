@@ -23,6 +23,7 @@ const { listingIsVat } = require('./vatHold.service');
 const orderService = require('./order.service');
 const { applyStatus } = require('./sellerOrder.service');
 const orderNotify = require('./orderNotify.service');
+const reviews = require('./review.service');
 const { round2, num, money, recordHistory, bookingShape } = require('./orderShared');
 const { USER_STATUS } = require('../utils/constants');
 const { VAT_STATUS } = require('../config/vat');
@@ -652,6 +653,7 @@ async function confirmDone(user, id) {
     return so.id;
   });
   orderNotify.sellerOrderStatusChanged(sellerOrderId);
+  reviews.requestReview(sellerOrderId); // "How was the service?"
   return getMine(user, id);
 }
 

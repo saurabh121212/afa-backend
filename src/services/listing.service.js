@@ -151,6 +151,8 @@ function baseShape(listing) {
   return {
     id: l.id,
     kind: l.kind,
+    // published reviews of orders with this listing ("4.6 (12)"); average null = no reviews yet
+    rating: { average: l.ratingAvg === null || l.ratingAvg === undefined ? null : Number(l.ratingAvg), count: Number(l.ratingCount || 0) },
     name: l.name,
     description: l.description,
     category: cat(l.category),

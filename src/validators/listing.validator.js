@@ -253,8 +253,11 @@ const publicList = [
   query('sort')
     .optional({ values: 'falsy' })
     .trim()
-    .isIn(['newest', 'price_asc', 'price_desc', 'name_asc'])
-    .withMessage('sort must be one of: newest, price_asc, price_desc, name_asc'),
+    .isIn(['newest', 'price_asc', 'price_desc', 'name_asc', 'rating'])
+    .withMessage('sort must be one of: newest, price_asc, price_desc, name_asc, rating'),
+  // seller (supplier) rating at least / listing rating at least, 1-5
+  query('minRating').optional({ values: 'falsy' }).isFloat({ min: 1, max: 5 }).withMessage('minRating must be from 1 to 5').toFloat(),
+  query('minListingRating').optional({ values: 'falsy' }).isFloat({ min: 1, max: 5 }).withMessage('minListingRating must be from 1 to 5').toFloat(),
   ...paging,
 ];
 
