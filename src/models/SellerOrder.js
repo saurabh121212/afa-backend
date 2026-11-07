@@ -2,7 +2,7 @@
 const { SELLER_ORDER_STATUS } = require('../config/orders');
 
 module.exports = (sequelize, DataTypes) => {
-  const money = { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 };
+  const money = () => ({ type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 });
   const SellerOrder = sequelize.define(
     'SellerOrder',
     {
@@ -16,15 +16,15 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: SELLER_ORDER_STATUS.AWAITING_PAYMENT,
       },
       fulfilment: { type: DataTypes.ENUM('pickup', 'delivery', 'service'), allowNull: false }, // service = a booking
-      subtotal: money,
-      deliveryFee: money,
-      deliveryVat: money,
-      vatTotal: money,
-      total: money,
+      subtotal: money(),
+      deliveryFee: money(),
+      deliveryVat: money(),
+      vatTotal: money(),
+      total: money(),
       buyerNote: { type: DataTypes.STRING(500), allowNull: true },
       sellerVatRegistered: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       payoutStatus: { type: DataTypes.ENUM('not_due', 'held', 'released', 'cancelled'), allowNull: false, defaultValue: 'not_due' },
-      payoutAmount: money,
+      payoutAmount: money(),
       paidAt: { type: DataTypes.DATE, allowNull: true },
       confirmBy: { type: DataTypes.DATE, allowNull: true },
       confirmedAt: { type: DataTypes.DATE, allowNull: true },
@@ -39,7 +39,7 @@ module.exports = (sequelize, DataTypes) => {
       // Phase 4: cancellations, claims, refunds
       cancelReason: { type: DataTypes.STRING(500), allowNull: true },
       cancelledBy: { type: DataTypes.ENUM('buyer', 'seller', 'admin', 'system'), allowNull: true },
-      refundedAmount: money,
+      refundedAmount: money(),
       claimStatus: { type: DataTypes.ENUM('none', 'active', 'closed'), allowNull: false, defaultValue: 'none' },
       openCancelRequestId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       activeClaimId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
