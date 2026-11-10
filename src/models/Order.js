@@ -3,7 +3,9 @@
 const { ORDER_STATUS, PAYMENT_METHODS, ORDER_KINDS } = require('../config/orders');
 
 module.exports = (sequelize, DataTypes) => {
-  const money = { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 };
+  // a NEW object for every column: Sequelize changes the object it is given, so one object shared by
+  // several columns would map them all to the first column's name
+  const money = () => ({ type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 });
   const Order = sequelize.define(
     'Order',
     {
@@ -15,10 +17,10 @@ module.exports = (sequelize, DataTypes) => {
       paymentMethod: { type: DataTypes.ENUM(...Object.keys(PAYMENT_METHODS)), allowNull: false },
       paymentDeadline: { type: DataTypes.DATE, allowNull: true },
       deliveryAddress: { type: DataTypes.JSON, allowNull: true },
-      subtotal: money,
-      deliveryTotal: money,
-      vatTotal: money,
-      total: money,
+      subtotal: money(),
+      deliveryTotal: money(),
+      vatTotal: money(),
+      total: money(),
       vatRate: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 0 },
       currency: { type: DataTypes.CHAR(3), allowNull: false, defaultValue: 'SZL' },
       idempotencyKey: { type: DataTypes.STRING(100), allowNull: true },

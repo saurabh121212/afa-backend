@@ -1,7 +1,9 @@
 // The current credit score of a farmer / trader / logistics provider (one row per user).
 // Worked out by services/creditScore.service.js; every change is logged in CreditScoreChange.
 module.exports = (sequelize, DataTypes) => {
-  const part = { type: DataTypes.DECIMAL(4, 1), allowNull: false, defaultValue: 0 };
+  // a NEW object for every column: Sequelize changes the object it is given, so one object shared by
+  // several columns would map them all to the first column's name
+  const part = () => ({ type: DataTypes.DECIMAL(4, 1), allowNull: false, defaultValue: 0 });
   const CreditScore = sequelize.define(
     'CreditScore',
     {
@@ -9,11 +11,11 @@ module.exports = (sequelize, DataTypes) => {
       userId: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       score: { type: DataTypes.TINYINT.UNSIGNED, allowNull: false, defaultValue: 0 },
       grade: { type: DataTypes.STRING(20), allowNull: false },
-      kycPoints: part,
-      salesPoints: part,
-      loanPoints: part,
-      insurancePoints: part,
-      ratingPoints: part,
+      kycPoints: part(),
+      salesPoints: part(),
+      loanPoints: part(),
+      insurancePoints: part(),
+      ratingPoints: part(),
       details: { type: DataTypes.JSON, allowNull: true },
       formulaVersion: { type: DataTypes.SMALLINT.UNSIGNED, allowNull: false, defaultValue: 1 },
       calculatedAt: { type: DataTypes.DATE, allowNull: false },
