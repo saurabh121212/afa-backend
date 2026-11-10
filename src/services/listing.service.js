@@ -27,7 +27,7 @@ const models = require('../models');
 const notifications = require('./notification.service');
 const ApiError = require('../utils/ApiError');
 const { getPagination, paginationMeta } = require('../utils/pagination');
-const { fileMatchesKind, kindForMimeType, formatLabels } = require('../utils/fileTypes');
+const { detectKind, formatLabels, FILE_KINDS } = require('../utils/fileTypes');
 const {
   LISTING_KIND_BY_USER_TYPE,
   LISTING_STATUS,
@@ -698,15 +698,27 @@ async function addPhotos(user, id, files) {
         code: 'LIMIT_REACHED',
       });
     }
-    // Real file content must be a JPG / PNG
+    // The real file content must be one of the allowed formats. A photo whose name says .JPG but is
+    // really a PNG / WEBP is accepted and saved with the right extension.
     for (const file of files) {
-      const kind = kindForMimeType(file.mimetype, LISTING_PHOTOS.formats);
       // eslint-disable-next-line no-await-in-loop
-      if (!kind || !(await fileMatchesKind(file.path, kind))) {
-        throw new ApiError(415, `"${file.originalname}" is not a valid image. Allowed: ${formatLabels(LISTING_PHOTOS.formats)}`, {
-          code: 'INVALID_FILE_CONTENT',
-        });
+      const kind = await detectKind(file.path, LISTING_PHOTOS.formats);
+      if (!kind) {
+        throw new ApiError(
+          415,
+          `"${file.originalname}" is not a valid image. Allowed: ${formatLabels(LISTING_PHOTOS.formats)}. ` +
+            '(iPhone HEIC photos: choose "Most Compatible" in Camera settings, or export as JPG.)',
+          { code: 'INVALID_FILE_CONTENT' }
+        );
       }
+      const ext = FILE_KINDS[kind].extension;
+      if (path.extname(file.path).toLowerCase() !== ext) {
+        const renamed = file.path.slice(0, -path.extname(file.path).length) + ext;
+        // eslint-disable-next-line no-await-in-loop
+        await fs.rename(file.path, renamed);
+        file.path = renamed;
+      }
+      file.mimetype = FILE_KINDS[kind].mimeTypes[0];
     }
 
     const maxOrder = await ListingPhoto.max('sortOrder', { where: { listingId: listing.id } });

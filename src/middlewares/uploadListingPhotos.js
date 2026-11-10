@@ -20,7 +20,7 @@ const storage = multer.diskStorage({
     fs.mkdir(dir, { recursive: true }, (err) => cb(err, dir));
   },
   filename: (req, file, cb) => {
-    const kind = kindForMimeType(file.mimetype, LISTING_PHOTOS.formats);
+    const kind = kindForMimeType(file.mimetype, LISTING_PHOTOS.formats, file.originalname);
     const random = crypto.randomBytes(6).toString('hex');
     cb(null, `photo-${Date.now()}-${random}${FILE_KINDS[kind].extension}`);
   },
@@ -30,7 +30,7 @@ const upload = multer({
   storage,
   limits: { fileSize: LISTING_PHOTOS.maxSizeMB * MB, files: LISTING_PHOTOS.max, fields: 5 },
   fileFilter: (req, file, cb) => {
-    if (!kindForMimeType(file.mimetype, LISTING_PHOTOS.formats)) {
+    if (!kindForMimeType(file.mimetype, LISTING_PHOTOS.formats, file.originalname)) {
       return cb(
         new ApiError(415, `Only ${formatLabels(LISTING_PHOTOS.formats)} photos are allowed`, {
           code: 'INVALID_FILE_TYPE',

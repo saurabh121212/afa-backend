@@ -160,7 +160,7 @@ const LOGISTICS_BY = { seller: 'Seller', buyer: 'Buyer' }; // who arranges picku
 const LISTING_PHOTOS = {
   max: 5,
   maxSizeMB: 5,
-  formats: ['jpg', 'png', 'jpeg', 'webp', 'heic', 'heif', 'avif', 'tiff', 'bmp','JPG', 'PNG', 'JPEG', 'WEBP'],
+  formats: ['jpg', 'png', 'webp'], // keys of utils/fileTypes.js FILE_KINDS ('jpg' also covers .jpeg / .JPG)
   folder: 'listings', // uploads/public/listings/<listingId>/
 };
 
