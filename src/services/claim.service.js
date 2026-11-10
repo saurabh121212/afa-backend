@@ -17,6 +17,7 @@
 // While a claim is active the seller order is not completed and the seller payout stays held.
 const { Op } = require('sequelize');
 const models = require('../models');
+const creditScore = require('./creditScore.service');
 const ApiError = require('../utils/ApiError');
 const settings = require('./setting.service');
 const directory = require('./userDirectory');
@@ -484,6 +485,7 @@ async function resolve(claim, so, actor, transaction) {
   }
   const now = new Date();
   await claim.update({ status: C.RESOLVED, resolvedAt: now, refundId, sellerRespondBy: null }, { transaction });
+  creditScore.refreshSoon(claim.sellerId, 'claim_refund', transaction); // Sales part: a refunded claim counts as a failed order (after commit)
   await so.update({ claimStatus: 'closed', activeClaimId: null }, { transaction });
   await recordHistory({ orderId: claim.orderId, sellerOrderId: so.id, to: 'claim_resolved', actor, note: `${claim.claimNumber}: refund ${money(amount)}` }, transaction);
   return refundId;

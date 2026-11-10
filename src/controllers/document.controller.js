@@ -10,9 +10,9 @@ const list = asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 });
 
-// POST .../register/documents/:documentType   (form-data, field "file")
+// POST .../register/documents/:documentType   (form-data, field "file"; insurance also "expiresAt" = YYYY-MM-DD)
 const upload = asyncHandler(async (req, res) => {
-  const data = await documentService.upload(req.user, req.params.documentType, req.file);
+  const data = await documentService.upload(req.user, req.params.documentType, req.file, { expiresAt: req.body ? req.body.expiresAt : undefined });
   const message = data.vatStatus
     ? `${data.label} uploaded. Your VAT registration will be checked again by the AFA team.`
     : `${data.label} uploaded`;

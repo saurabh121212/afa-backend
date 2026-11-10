@@ -28,6 +28,9 @@ const {
   statusLabelFor,
 } = require('../config/orders');
 
+const reviews = require('./review.service');
+const creditScore = require('./creditScore.service');
+
 const { sequelize, Order, SellerOrder, OrderItem, OrderStatusHistory, User, Booking } = models;
 const cancellations = require('./cancellation.service');
 const claims = require('./claim.service');
@@ -58,6 +61,7 @@ async function applyStatus(so, to, actor, { note = null } = {}, transaction) {
   const from = so.status;
   await so.update(values, { transaction });
   await recordHistory({ orderId: so.orderId, sellerOrderId: so.id, from, to, actor, note }, transaction);
+  if (to === SO.COMPLETED) creditScore.refreshSoon(so.sellerId, 'order_completed', transaction); // Sales part (after commit)
 }
 
 // ---------- seller: list / stats / details ----------
@@ -66,6 +70,7 @@ const SELLER_VISIBLE = { paidAt: { [Op.ne]: null } }; // only paid orders reach 
 const listIncludes = () => [
   { model: OrderItem, as: 'items' },
   { model: Booking, as: 'booking' },
+  { model: models.Review, as: 'review', attributes: ['id', 'rating', 'status', 'createdAt', 'reply'] },
   { model: Order, as: 'order', attributes: ['id', 'orderNumber', 'userId', 'deliveryAddress', 'createdAt'] },
 ];
 
@@ -270,7 +275,10 @@ async function completeDue({ limit = 100 } = {}) {
       await applyStatus(so, SO.COMPLETED, { type: 'system' }, { note: 'Claim window ended' }, transaction);
       return true;
     });
-    if (done) completed += 1;
+    if (done) {
+      completed += 1;
+      reviews.requestReview(id); // "How was your order?" (never throws)
+    }
   }
   return completed;
 }

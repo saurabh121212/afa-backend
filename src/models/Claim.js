@@ -6,6 +6,8 @@
 const { CLAIM_STATUS, CLAIM_REASONS } = require('../config/refunds');
 
 module.exports = (sequelize, DataTypes) => {
+  // a NEW object for every column: Sequelize changes the object it is given, so one object shared by
+  // several columns would map them all to the first column's name
   const money = () => ({ type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 });
   const Claim = sequelize.define(
     'Claim',

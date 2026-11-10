@@ -25,9 +25,10 @@ const { Op } = require('sequelize');
 const config = require('../config');
 const models = require('../models');
 const notifications = require('./notification.service');
+const verification = require('./verification.service');
 const ApiError = require('../utils/ApiError');
 const { getPagination, paginationMeta } = require('../utils/pagination');
-const { fileMatchesKind, kindForMimeType, formatLabels } = require('../utils/fileTypes');
+const { detectKind, formatLabels, FILE_KINDS } = require('../utils/fileTypes');
 const {
   LISTING_KIND_BY_USER_TYPE,
   LISTING_STATUS,
@@ -151,6 +152,8 @@ function baseShape(listing) {
   return {
     id: l.id,
     kind: l.kind,
+    // published reviews of orders with this listing ("4.6 (12)"); average null = no reviews yet
+    rating: { average: l.ratingAvg === null || l.ratingAvg === undefined ? null : Number(l.ratingAvg), count: Number(l.ratingCount || 0) },
     name: l.name,
     description: l.description,
     category: cat(l.category),
@@ -492,7 +495,9 @@ async function listMine(user, query) {
     counts[g.status] = Number(g.total);
   });
 
-  return { items: rows.map(toSeller), counts, pagination: paginationMeta(pg, count) };
+  // { limited, maxListings, used, remaining }: show "2 of 3 listings used" until the seller is verified
+  const listingLimit = await verification.listingLimitFor(user);
+  return { items: rows.map(toSeller), counts, listingLimit, pagination: paginationMeta(pg, count) };
 }
 
 // ---------- GET /me/listings/:id ----------
@@ -514,6 +519,8 @@ async function sendForReview(user, listing, transaction) {
     const sub = listing.subCategoryId ? await Category.findByPk(listing.subCategoryId, { transaction }) : null;
     assertVatAllowed(user, category, sub);
   }
+  // Not fully verified yet: limited number of listings live / in review
+  await verification.assertListingSlot(user, listing, transaction);
   await listing.update(
     { status: S.PENDING, submittedAt: new Date(), statusReason: null },
     { transaction }
@@ -665,6 +672,7 @@ async function setVisibility(user, id, { visible }) {
         { code: 'INVALID_STATUS_CHANGE' }
       );
     }
+    if (visible) await verification.assertListingSlot(user, listing);
     await listing.update({ status: target });
   }
   return toSeller(await findOwn(user, id));
@@ -696,15 +704,27 @@ async function addPhotos(user, id, files) {
         code: 'LIMIT_REACHED',
       });
     }
-    // Real file content must be a JPG / PNG
+    // The real file content must be one of the allowed formats. A photo whose name says .JPG but is
+    // really a PNG / WEBP is accepted and saved with the right extension.
     for (const file of files) {
-      const kind = kindForMimeType(file.mimetype, LISTING_PHOTOS.formats);
       // eslint-disable-next-line no-await-in-loop
-      if (!kind || !(await fileMatchesKind(file.path, kind))) {
-        throw new ApiError(415, `"${file.originalname}" is not a valid image. Allowed: ${formatLabels(LISTING_PHOTOS.formats)}`, {
-          code: 'INVALID_FILE_CONTENT',
-        });
+      const kind = await detectKind(file.path, LISTING_PHOTOS.formats);
+      if (!kind) {
+        throw new ApiError(
+          415,
+          `"${file.originalname}" is not a valid image. Allowed: ${formatLabels(LISTING_PHOTOS.formats)}. ` +
+            '(iPhone HEIC photos: choose "Most Compatible" in Camera settings, or export as JPG.)',
+          { code: 'INVALID_FILE_CONTENT' }
+        );
       }
+      const ext = FILE_KINDS[kind].extension;
+      if (path.extname(file.path).toLowerCase() !== ext) {
+        const renamed = file.path.slice(0, -path.extname(file.path).length) + ext;
+        // eslint-disable-next-line no-await-in-loop
+        await fs.rename(file.path, renamed);
+        file.path = renamed;
+      }
+      file.mimetype = FILE_KINDS[kind].mimeTypes[0];
     }
 
     const maxOrder = await ListingPhoto.max('sortOrder', { where: { listingId: listing.id } });

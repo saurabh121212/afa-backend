@@ -17,7 +17,7 @@ const { round2, num, money } = require('../orderShared');
 const { SELLER_ORDER_STATUS_LABELS, PAYMENT_METHODS } = require('../../config/orders');
 const { USER_TYPE_LABELS } = require('../../utils/constants');
 
-const { SellerOrder, Order, OrderItem, Refund, User, Listing, Payment, Claim, CancellationRequest, ContactMessage } = models;
+const { SellerOrder, Order, OrderItem, Refund, User, Listing, Payment, Claim, CancellationRequest, ContactMessage, Review } = models;
 
 const CACHE_MS = 5 * 60 * 1000;
 const cache = new Map(); // key -> { at, data }
@@ -40,7 +40,7 @@ async function load(p) {
 const sum = (list, f) => round2(list.reduce((s, x) => s + num(f(x)), 0));
 
 async function todo() {
-  const [registrations, listings, payments, vat, claims, cancelRequests, refunds, contact] = await Promise.all([
+  const [registrations, listings, payments, vat, claims, cancelRequests, refunds, contact, reviewsHeld, reviewsReported] = await Promise.all([
     User.count({ where: { status: 'pending_approval' } }),
     Listing.count({ where: { status: 'pending' } }),
     Payment.count({ where: { method: 'bank_transfer', status: 'under_review' } }),
@@ -49,8 +49,11 @@ async function todo() {
     CancellationRequest.count({ where: { status: 'escalated' } }),
     Refund.count({ where: { status: 'pending' } }),
     ContactMessage.count({ where: { status: 'new' } }),
+    Review.count({ where: { status: 'held' } }),
+    Review.count({ where: { status: 'published', openReports: { [Op.gt]: 0 } } }),
   ]);
-  return { registrations, listings, payments, vat, claims, cancelRequests, refunds, contactMessages: contact };
+  // reviews: waiting for approval + reported
+  return { registrations, listings, payments, vat, claims, cancelRequests, refunds, contactMessages: contact, reviews: reviewsHeld + reviewsReported };
 }
 
 // Per seller: sales + performance in the period

@@ -22,6 +22,8 @@ module.exports = (sequelize, DataTypes) => {
       rejectionReason: { type: DataTypes.TEXT, allowNull: true },
       reviewedAt: { type: DataTypes.DATE, allowNull: true },
       reviewedBy: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
+      // insurance documents: the date the cover ends (YYYY-MM-DD)
+      expiresAt: { type: DataTypes.DATEONLY, allowNull: true },
     },
     {
       tableName: 'user_documents',

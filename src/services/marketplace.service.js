@@ -20,9 +20,15 @@ const SORTS = {
   price_desc: [['price', 'DESC'], ['id', 'DESC']],
   name_asc: [['name', 'ASC'], ['id', 'ASC']],
 };
+// best rated first; listings without reviews last (built when used)
+const sortOrder = (key) =>
+  key === 'rating'
+    ? [[sequelize.literal('`Listing`.`rating_avg` IS NULL'), 'ASC'], ['ratingAvg', 'DESC'], ['ratingCount', 'DESC'], ['id', 'DESC']]
+    : SORTS[key] || SORTS.newest;
 
 // Public seller card. Farmers show their farm name when they have one ("Sunrise Farm").
-function sellerShape(userId, dir) {
+// sellerUser (optional): the included seller row, for the seller's rating
+function sellerShape(userId, dir, sellerUser = null) {
   if (!dir) return { id: userId };
   const name = dir.user_type === 'farmer' ? dir.sub_name || dir.display_name : dir.display_name;
   return {
@@ -32,18 +38,27 @@ function sellerShape(userId, dir) {
     userType: dir.user_type,
     userTypeLabel: USER_TYPE_LABELS[dir.user_type],
     region: dir.region_id ? { id: dir.region_id, name: dir.region_name } : null,
-    verified: dir.status === USER_STATUS.APPROVED,
+    // "Verified" badge: account approved AND every KYC document approved (verification.service.js)
+    verified: dir.status === USER_STATUS.APPROVED && Boolean(dir.kyc_verified_at),
+    ...(sellerUser
+      ? { rating: { average: sellerUser.ratingAvg === null || sellerUser.ratingAvg === undefined ? null : Number(sellerUser.ratingAvg), count: Number(sellerUser.ratingCount || 0) } }
+      : {}),
   };
 }
 
 // Includes that also do the "only visible listings" filtering
-function visibleIncludes({ sellerType } = {}) {
+// minRating: only sellers rated at least this (supplier rating filter)
+function visibleIncludes({ sellerType, minRating } = {}) {
   return [
     {
       model: User,
       as: 'seller',
-      attributes: ['id', 'userType', 'status'],
-      where: { status: USER_STATUS.APPROVED, ...(sellerType ? { userType: sellerType } : {}) },
+      attributes: ['id', 'userType', 'status', 'ratingAvg', 'ratingCount'],
+      where: {
+        status: USER_STATUS.APPROVED,
+        ...(sellerType ? { userType: sellerType } : {}),
+        ...(minRating ? { ratingAvg: { [Op.gte]: minRating } } : {}),
+      },
       required: true,
     },
     {
@@ -72,6 +87,7 @@ async function list(query) {
   if (query.subCategoryId) where.subCategoryId = query.subCategoryId;
   if (query.sellerId) where.userId = query.sellerId;
   if (query.availability) where.availability = query.availability;
+  if (query.minListingRating) where.ratingAvg = { [Op.gte]: query.minListingRating };
   if (query.minPrice !== undefined || query.maxPrice !== undefined) {
     where.price = {
       ...(query.minPrice !== undefined ? { [Op.gte]: query.minPrice } : {}),
@@ -96,8 +112,8 @@ async function list(query) {
 
   const { rows, count } = await Listing.findAndCountAll({
     where,
-    include: visibleIncludes({ sellerType: query.sellerType }),
-    order: SORTS[query.sort] || SORTS.newest,
+    include: visibleIncludes({ sellerType: query.sellerType, minRating: query.minRating }),
+    order: sortOrder(query.sort),
     limit: pg.limit,
     offset: pg.offset,
     distinct: true,
@@ -105,7 +121,7 @@ async function list(query) {
 
   const sellers = await directory.findMany(rows.map((r) => r.userId));
   return {
-    items: rows.map((r) => ({ ...baseShape(r), seller: sellerShape(r.userId, sellers.get(r.userId)) })),
+    items: rows.map((r) => ({ ...baseShape(r), seller: sellerShape(r.userId, sellers.get(r.userId), r.seller) })),
     pagination: paginationMeta(pg, count),
   };
 }
@@ -160,7 +176,7 @@ async function related(id, { limit = 8 } = {}) {
     limit,
   });
   const sellers = await directory.findMany(rows.map((r) => r.userId));
-  return rows.map((r) => ({ ...baseShape(r), seller: sellerShape(r.userId, sellers.get(r.userId)) }));
+  return rows.map((r) => ({ ...baseShape(r), seller: sellerShape(r.userId, sellers.get(r.userId), r.seller) }));
 }
 
 module.exports = { list, getById, related, sellerShape, visibleIncludes };

@@ -8,6 +8,8 @@
 //   5. claims: no seller reply in time -> AFA; rejected and not
 //      escalated / item not returned in time -> closed             -> claim.service.runDue
 //   6. send admin advisories / announcements that are due          -> broadcast.service.sendDue
+//   7. credit scores older than 24 hours / not calculated yet
+//      (200 per run; catches expired insurance)                    -> creditScore.service.refreshStale
 //
 // Turn off with RUN_JOBS=false (e.g. on extra servers if the API ever runs on more than one).
 const paymentService = require('../services/payment.service');
@@ -15,32 +17,41 @@ const sellerOrderService = require('../services/sellerOrder.service');
 const cancellationService = require('../services/cancellation.service');
 const claimService = require('../services/claim.service');
 const broadcastService = require('../services/broadcast.service');
+const creditScoreService = require('../services/creditScore.service');
 
 const EVERY_MS = 60 * 1000;
 let timer = null;
 let running = false; // never start a run while the previous one is still busy
 
+// Each job runs on its own: one failing job never stops the others
+async function safely(name, fn, fallback) {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`Order job "${name}" failed:`, err.message);
+    return fallback;
+  }
+}
+
 async function runOnce() {
   if (running) return null;
   running = true;
   try {
-    const cancelled = await paymentService.cancelOverdue();
-    const autoCancelled = await cancellationService.autoCancelUnconfirmed();
-    const requestsEscalated = await cancellationService.escalateRequests();
-    const claimsDue = await claimService.runDue();
-    const completed = await sellerOrderService.completeDue();
-    const broadcasts = await broadcastService.sendDue();
-    const result = { cancelled, autoCancelled, requestsEscalated, claimsEscalated: claimsDue.escalated, claimsClosed: claimsDue.closed, completed, broadcasts };
+    const cancelled = await safely('unpaid orders', () => paymentService.cancelOverdue(), 0);
+    const autoCancelled = await safely('unconfirmed orders', () => cancellationService.autoCancelUnconfirmed(), 0);
+    const requestsEscalated = await safely('cancellation requests', () => cancellationService.escalateRequests(), 0);
+    const claimsDue = await safely('claims', () => claimService.runDue(), { escalated: 0, closed: 0 });
+    const completed = await safely('completions', () => sellerOrderService.completeDue(), 0);
+    const broadcasts = await safely('broadcasts', () => broadcastService.sendDue(), 0);
+    const creditScores = await safely('credit scores', () => creditScoreService.refreshStale(), 0);
+    const result = { cancelled, autoCancelled, requestsEscalated, claimsEscalated: claimsDue.escalated, claimsClosed: claimsDue.closed, completed, broadcasts, creditScores };
     if (Object.values(result).some(Boolean)) {
       console.log(
         `🕒 Order jobs: ${cancelled} unpaid cancelled, ${autoCancelled} unconfirmed cancelled, ${requestsEscalated} request(s) + ` +
-          `${claimsDue.escalated} claim(s) sent to AFA, ${claimsDue.closed} claim(s) closed, ${completed} completed, ${broadcasts} broadcast(s) sent`
+          `${claimsDue.escalated} claim(s) sent to AFA, ${claimsDue.closed} claim(s) closed, ${completed} completed, ${broadcasts} broadcast(s) sent, ${creditScores} credit score(s) updated`
       );
     }
     return result;
-  } catch (err) {
-    console.error('Order jobs failed:', err.message);
-    return null;
   } finally {
     running = false;
   }

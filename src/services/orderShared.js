@@ -1,6 +1,6 @@
 // Shared pieces for checkout, payments and the buyer / seller / admin order screens:
 // loading an order, the API "shapes", the timeline and small helpers.
-const { Order, SellerOrder, OrderItem, OrderStatusHistory, Payment, Refund, Booking } = require('../models');
+const { Order, SellerOrder, OrderItem, OrderStatusHistory, Payment, Refund, Booking, Review } = require('../models');
 const ApiError = require('../utils/ApiError');
 const { CURRENCY, SERVICE_RATE_UNITS, CAPACITY_UNITS } = require('../config/listingOptions');
 const {
@@ -16,6 +16,11 @@ const {
   statusLabelFor,
 } = require('../config/orders');
 const { BOOKING_TYPES, SPACE_UNIT_LABELS, buyerCancelMode, daysBetween } = require('../config/bookings');
+const { REVIEW_RULES, REVIEW_STATUS_LABELS } = require('../config/reviews');
+
+// The buyer's review of a seller order (null = not reviewed)
+const reviewSummary = (r) => (r ? { id: r.id, rating: Number(r.rating), status: r.status, statusLabel: REVIEW_STATUS_LABELS[r.status], hasReply: Boolean(r.reply), createdAt: r.createdAt } : null);
+const reviewOpenUntil = (so) => (so.completedAt ? new Date(new Date(so.completedAt).getTime() + REVIEW_RULES.windowDays * 86400000) : null);
 const { BUYER_DIRECT_CANCEL, BUYER_REQUEST_CANCEL, SELLER_CANCEL, CANCELLED_BY_LABELS } = require('../config/refunds');
 
 // ---------- numbers ----------
@@ -78,7 +83,15 @@ function timeline(history = [], sellerOrderId = null, fulfilment = null) {
 
 // ---------- loading ----------
 const fullIncludes = () => [
-  { model: SellerOrder, as: 'sellerOrders', include: [{ model: OrderItem, as: 'items' }, { model: Booking, as: 'booking' }] },
+  {
+    model: SellerOrder,
+    as: 'sellerOrders',
+    include: [
+      { model: OrderItem, as: 'items' },
+      { model: Booking, as: 'booking' },
+      { model: Review, as: 'review', attributes: ['id', 'rating', 'status', 'createdAt', 'reply'] },
+    ],
+  },
   { model: Payment, as: 'payments' },
   { model: OrderStatusHistory, as: 'history' },
   { model: Refund, as: 'refunds' },
@@ -189,6 +202,8 @@ function sellerOrderShape(so, { view = 'buyer', seller = null, history = [] } = 
     fulfilmentLabel: FULFILMENT_LABELS[so.fulfilment] || so.fulfilment,
     isBooking: so.fulfilment === 'service',
     booking: so.fulfilment === 'service' ? bookingShape(so.booking) : null,
+    // sellers see only published reviews
+    review: view === 'seller' && so.review && so.review.status !== 'published' ? null : reviewSummary(so.review),
     seller,
     items: (so.items || []).slice().sort((a, b) => a.id - b.id).map(itemShape),
     subtotal: num(so.subtotal),
@@ -236,6 +251,9 @@ function sellerOrderShape(so, { view = 'buyer', seller = null, history = [] } = 
     base.canConfirmReceived = !isBooking && [SELLER_ORDER_STATUS.DISPATCHED, SELLER_ORDER_STATUS.READY_FOR_PICKUP].includes(so.status);
     base.actions = {
       canConfirmReceived: base.canConfirmReceived,
+      // Completed and not reviewed yet (up to 30 days after completion): "Rate this order"
+      canReview: so.status === SELLER_ORDER_STATUS.COMPLETED && !so.review && Boolean(reviewOpenUntil(so)) && reviewOpenUntil(so) > new Date(),
+      reviewUntil: so.status === SELLER_ORDER_STATUS.COMPLETED && !so.review ? reviewOpenUntil(so) : null,
       // Bookings: "Service Done" -> the buyer confirms (completed) or reports a problem
       canConfirmServiceDone: isBooking && so.status === SELLER_ORDER_STATUS.DELIVERED && (so.claimStatus || 'none') !== 'active',
       // "New Order": cancelled at once. Confirmed / Packed: a request to the seller.

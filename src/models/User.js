@@ -53,6 +53,11 @@ module.exports = (sequelize, DataTypes) => {
       rejectionReason: { type: DataTypes.TEXT, allowNull: true },
       // Admin approval (latest status change)
       approvedAt: { type: DataTypes.DATE, allowNull: true },
+      // set when the account AND every KYC document are approved ("Verified" badge), see verification.service.js
+      kycVerifiedAt: { type: DataTypes.DATE, allowNull: true },
+      // sellers: average of published reviews ("4.8 (42 reviews)")
+      ratingAvg: { type: DataTypes.DECIMAL(3, 2), allowNull: true },
+      ratingCount: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
       statusReason: { type: DataTypes.TEXT, allowNull: true }, // admin's message / reason
       statusChangedAt: { type: DataTypes.DATE, allowNull: true },
       statusChangedBy: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true }, // admin id
@@ -99,6 +104,7 @@ module.exports = (sequelize, DataTypes) => {
   );
 
   User.associate = (models) => {
+    User.hasOne(models.CreditScore, { as: 'creditScore', foreignKey: 'userId' });
     User.hasOne(models.FarmerProfile, { as: 'farmerProfile', foreignKey: 'userId' });
     User.hasOne(models.BuyerProfile, { as: 'buyerProfile', foreignKey: 'userId' });
     User.hasOne(models.TraderProfile, { as: 'traderProfile', foreignKey: 'userId' });

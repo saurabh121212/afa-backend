@@ -13,7 +13,8 @@ const { getPagination, paginationMeta } = require('../utils/pagination');
 const { toCsvLine } = require('../utils/csv');
 const { displayId } = require('../utils/displayId');
 const { USER_STATUS, USER_STATUS_LABELS, USER_TYPE_LABELS, USER_TYPES } = require('../utils/constants');
-const { getDocumentTypes, isAvailableFor, countsForKyc, VAT_CERTIFICATE_TYPE } = require('../config/documentTypes');
+const { getDocumentTypes, getDocumentType, isAvailableFor, countsForKyc, hasExpiry, VAT_CERTIFICATE_TYPE } = require('../config/documentTypes');
+const creditScore = require('./creditScore.service');
 const vatService = require('./vat.service');
 const adminVatService = require('./adminVat.service');
 const directory = require('./userDirectory');
@@ -99,7 +100,8 @@ function toListItem(row) {
     statusLabel: USER_STATUS_LABELS[row.status],
     joinedAt: joined,
     submittedAt: row.submitted_at,
-    trustScore: null, // filled in by the credit score module later
+    kycVerified: Boolean(row.kyc_verified_at), // account + every KYC document approved ("Verified" badge)
+    trustScore: null, // the credit score (0-100) of farmers, traders and logistics providers: set by list()
   };
 }
 
@@ -111,7 +113,11 @@ async function list(query) {
     limit: pg.limit,
     offset: pg.offset,
   });
-  return { items: rows.map(toListItem), pagination: paginationMeta(pg, total) };
+  const scores = await creditScore.scoresFor(rows.map((r) => r.id));
+  return {
+    items: rows.map((r) => ({ ...toListItem(r), trustScore: scores.has(Number(r.id)) ? scores.get(Number(r.id)) : null })),
+    pagination: paginationMeta(pg, total),
+  };
 }
 
 // GET /admin/users/stats
@@ -209,7 +215,12 @@ async function getDetails(id) {
       : null,
     notes,
     paymentMethods: paymentMethodService.isAllowed(user.userType) ? paymentMethods : null,
-    trustScore: null,
+    // farmers, traders and logistics providers: { score, grade, gradeLabel, calculatedAt } (details: /admin/credit-scores/:id)
+    kycVerified: Boolean(user.kycVerifiedAt), // "Verified" badge (account + every KYC document approved)
+    ...(await (async () => {
+      const cs = await creditScore.summaryFor(user.id, user.userType);
+      return { trustScore: cs ? cs.score : null, creditScore: cs };
+    })()),
   };
 }
 
@@ -219,19 +230,35 @@ async function getDocumentFile(id, documentType) {
   return documentService.getFile(user, documentType);
 }
 
-// PATCH /admin/users/:id/documents/:documentType/review   { status, reason }
-async function reviewDocument(id, documentType, { status, reason }, adminId) {
-  await findUserOr404(id);
+// PATCH /admin/users/:id/documents/:documentType/review   { status, reason, expiresAt? }
+// Insurance documents (hasExpiry): approving needs an expiry date that has not passed: the one the user
+// gave, or expiresAt sent here to correct it.
+async function reviewDocument(id, documentType, { status, reason, expiresAt }, adminId) {
+  const user = await findUserOr404(id);
   const doc = await UserDocument.findOne({ where: { userId: id, documentType } });
   if (!doc) {
     throw new ApiError(404, 'This document has not been uploaded yet', { code: 'DOCUMENT_NOT_FOUND' });
   }
-  await doc.update({
+  const rules = getDocumentType(user.userType, documentType);
+  const changes = {
     status,
     rejectionReason: status === 'rejected' ? reason : null,
     reviewedAt: new Date(),
     reviewedBy: adminId,
-  });
+  };
+  if (expiresAt && hasExpiry(rules)) changes.expiresAt = expiresAt; // only insurance documents have an expiry
+  if (status === 'approved' && hasExpiry(rules)) {
+    const expiry = expiresAt || (doc.expiresAt ? String(doc.expiresAt).slice(0, 10) : null);
+    const today = new Date(Date.now() + 2 * 3600 * 1000).toISOString().slice(0, 10);
+    const invalid = (message) => new ApiError(422, 'Validation failed', { code: 'VALIDATION_ERROR', errors: [{ field: 'expiresAt', message }] });
+    if (!expiry) throw invalid('Enter the expiry date shown on the document (expiresAt, YYYY-MM-DD) to approve it');
+    if (Number.isNaN(Date.parse(`${expiry}T00:00:00Z`)) || new Date(`${expiry}T00:00:00Z`).toISOString().slice(0, 10) !== expiry) {
+      throw invalid('expiresAt must be a real date in YYYY-MM-DD format');
+    }
+    if (expiry < today) throw invalid('This document has expired: reject it and ask the user for the new one');
+  }
+  await doc.update(changes);
+  creditScore.refreshSoon(Number(id), 'document_review');
 
   // The VAT certificate also decides the seller's VAT status (see adminVat.service)
   if (documentType === VAT_CERTIFICATE_TYPE) {
@@ -256,6 +283,7 @@ async function changeStatus(id, action, adminId, apply) {
   const now = new Date();
   const changes = apply(user, now);
   await user.update({ ...changes, statusChangedAt: now, statusChangedBy: adminId });
+  creditScore.refreshSoon(user.id, 'account_status'); // KYC part needs an approved account
   return user;
 }
 

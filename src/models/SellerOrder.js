@@ -2,6 +2,8 @@
 const { SELLER_ORDER_STATUS } = require('../config/orders');
 
 module.exports = (sequelize, DataTypes) => {
+  // a NEW object for every column: Sequelize changes the object it is given, so one object shared by
+  // several columns would map them all to the first column's name
   const money = () => ({ type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 });
   const SellerOrder = sequelize.define(
     'SellerOrder',
@@ -55,6 +57,7 @@ module.exports = (sequelize, DataTypes) => {
     SellerOrder.hasMany(models.Claim, { as: 'claims', foreignKey: 'sellerOrderId' });
     SellerOrder.hasMany(models.Refund, { as: 'refunds', foreignKey: 'sellerOrderId' });
     SellerOrder.hasOne(models.Booking, { as: 'booking', foreignKey: 'sellerOrderId' });
+    SellerOrder.hasOne(models.Review, { as: 'review', foreignKey: 'sellerOrderId' });
   };
 
   return SellerOrder;

@@ -6,7 +6,21 @@ const fs = require('fs/promises');
 const config = require('../config');
 const { UserDocument } = require('../models');
 const ApiError = require('../utils/ApiError');
-const { getDocumentTypes, getDocumentType, isAvailableFor, countsForKyc, VAT_CERTIFICATE_TYPE } = require('../config/documentTypes');
+const { getDocumentTypes, getDocumentType, isAvailableFor, countsForKyc, hasExpiry, VAT_CERTIFICATE_TYPE } = require('../config/documentTypes');
+const creditScore = require('./creditScore.service');
+
+// Insurance documents: "YYYY-MM-DD", a real date, not in the past (Eswatini date)
+function checkExpiry(value, label) {
+  const bad = (message) => new ApiError(422, 'Validation failed', { code: 'VALIDATION_ERROR', errors: [{ field: 'expiresAt', message }] });
+  if (!value) return bad(`Enter the expiry date of your ${label} (YYYY-MM-DD)`);
+  const v = String(value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`)) || new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) !== v) {
+    return bad('expiresAt must be a date in YYYY-MM-DD format');
+  }
+  const today = new Date(Date.now() + 2 * 3600 * 1000).toISOString().slice(0, 10);
+  if (v < today) return bad('This document has already expired. Please upload a valid one.');
+  return v;
+}
 const vatService = require('./vat.service');
 const { kindForMimeType, fileMatchesKind, formatLabels } = require('../utils/fileTypes');
 
@@ -46,6 +60,8 @@ async function list(user, { subtype = null, subtypeLabel = (s) => s } = {}) {
       maxSizeMB: rules.maxSizeMB,
       required: rules.required,
       countsForKyc: countsForKyc(rules), // false = optional extra (VAT certificate), not in the counts
+      hasExpiry: hasExpiry(rules), // true = send expiresAt (YYYY-MM-DD) with the file (insurance)
+      creditScore: rules.creditScore || null, // 'insurance' = gives the Insurance part of the credit score
       // e.g. "Business / Food Processor accounts only" badge in Figma
       onlyFor: rules.onlyForSubtypes ? rules.onlyForSubtypes.map(subtypeLabel) : null,
       available: isAvailableFor(rules, subtype),
@@ -64,12 +80,20 @@ async function list(user, { subtype = null, subtypeLabel = (s) => s } = {}) {
 
 // POST .../documents/:documentType -> save a new file (replaces the old one)
 // (The "is this document allowed for you" check already ran in uploadKycDocument.)
-async function upload(user, documentType, file) {
+// fields: form fields sent with the file; insurance documents need expiresAt (YYYY-MM-DD)
+async function upload(user, documentType, file, fields = {}) {
   const rules = getDocumentType(user.userType, documentType);
   const kind = kindForMimeType(file.mimetype, rules.formats);
 
   let document;
   try {
+    let expiresAt = null;
+    if (hasExpiry(rules)) {
+      const checked = checkExpiry(fields.expiresAt, rules.label);
+      if (checked instanceof ApiError) throw checked;
+      expiresAt = checked;
+    }
+
     // The file's real content must match its claimed type
     if (!(await fileMatchesKind(file.path, kind))) {
       throw new ApiError(
@@ -91,6 +115,7 @@ async function upload(user, documentType, file) {
       rejectionReason: null,
       reviewedAt: null,
       reviewedBy: null,
+      expiresAt,
     };
 
     const existing = await UserDocument.findOne({ where: { userId: user.id, documentType } });
@@ -109,6 +134,7 @@ async function upload(user, documentType, file) {
 
   // A new VAT certificate needs a fresh review: approved / rejected VAT goes back to "pending"
   const vatChange = documentType === VAT_CERTIFICATE_TYPE ? await vatService.onCertificateUploaded(user.id) : null;
+  creditScore.refreshSoon(user.id, 'document_change'); // a new file waits for approval again
 
   return {
     documentType,
@@ -130,6 +156,7 @@ async function remove(user, documentType) {
 
   // No certificate = no proof of VAT registration
   const vatChange = documentType === VAT_CERTIFICATE_TYPE ? await vatService.onCertificateRemoved(user.id) : null;
+  creditScore.refreshSoon(user.id, 'document_change');
   return { documentType, ...(vatChange ? { vatStatus: vatChange.to } : {}) };
 }
 
@@ -145,6 +172,7 @@ async function removeTypes(userId, documentTypes) {
     await deleteFileQuietly(absolutePath(filePath));
     removed.push(doc.documentType);
   }
+  if (removed.length) creditScore.refreshSoon(userId, 'document_change');
   return removed;
 }
 

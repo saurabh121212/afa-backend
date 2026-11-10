@@ -30,6 +30,8 @@ const express = require('express');
 const controller = require('../controllers/sales.controller');
 const cancellation = require('../controllers/cancellation.controller');
 const claim = require('../controllers/claim.controller').seller;
+const reviewController = require('../controllers/review.controller').seller;
+const reviewRules = require('../validators/review.validator');
 const refundRules = require('../validators/refund.validator');
 const validateUpload = require('../middlewares/validateUpload');
 const uploadPrivateFiles = require('../middlewares/uploadPrivateFiles');
@@ -50,6 +52,12 @@ const photos = uploadPrivateFiles({
 
 const router = express.Router();
 router.use(protectUser, requireUserType('farmer', 'trader', 'logistics'), requireApprovedAccount);
+
+// Reviews about me (before /:id)
+//   GET  /me/sales/reviews              summary + published reviews (?rating=&replied=true|false&page=)
+//   POST /me/sales/reviews/:id/reply    { reply }   one public reply per review
+router.get('/reviews', reviewRules.received, validate, reviewController.list);
+router.post('/reviews/:id/reply', reviewRules.reply, validate, reviewController.reply);
 
 // Claims (before /:id)
 router.get('/claims', refundRules.claimList, validate, claim.list);
