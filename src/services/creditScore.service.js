@@ -22,7 +22,8 @@ const { getPagination, paginationMeta } = require('../utils/pagination');
 const { toCsvLine } = require('../utils/csv');
 const { displayId } = require('../utils/displayId');
 const { USER_TYPE_LABELS, USER_STATUS_LABELS } = require('../utils/constants');
-const { getDocumentTypes, isAvailableFor, countsForKyc } = require('../config/documentTypes');
+const { getDocumentTypes } = require('../config/documentTypes');
+const verification = require('./verification.service');
 const { todayYmd } = require('../config/bookings');
 const C = require('../config/creditScore');
 
@@ -49,10 +50,8 @@ async function gather(userId, { transaction } = {}) {
   const byType = new Map(docs.map((d) => [d.documentType, d]));
   const types = getDocumentTypes(user.userType);
 
-  // 1. KYC documents of the account check (not the VAT certificate / farmer & trader insurance)
-  const kycDocuments = Object.entries(types)
-    .filter(([, rules]) => isAvailableFor(rules, subtype) && countsForKyc(rules))
-    .map(([documentType, rules]) => ({ documentType, label: rules.label, status: byType.has(documentType) ? byType.get(documentType).status : 'missing' }));
+  // 1. KYC documents of the account check (same rule as the Verified badge: verification.service)
+  const kycDocuments = verification.kycDocumentsFor(user.userType, subtype, docs).map(({ documentType, label, status }) => ({ documentType, label, status }));
 
   // 2. Sales: each paid seller order counted once
   const paidIds = new Set(sos.map((so) => so.id));
@@ -134,6 +133,8 @@ async function refresh(userId, trigger = 'daily', attempt = 0) {
       const after = Object.fromEntries(C.PART_KEYS.map((k) => [k, result.parts[k].points]));
       const changedParts = C.PART_KEYS.filter((k) => !before || before[k] !== after[k]).map((k) => ({ part: k, from: before ? before[k] : null, to: after[k] }));
       const row = existing ? await existing.update(values, { transaction }) : await CreditScore.create({ userId, ...values }, { transaction });
+      // Verified badge = full KYC points (account + every KYC document approved)
+      await verification.syncFlag(userId, result.parts.kyc.points >= C.PART_MAX, { transaction });
       if (!existing || changedParts.length || oldScore !== result.score) {
         await CreditScoreChange.create(
           {

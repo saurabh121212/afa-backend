@@ -221,6 +221,19 @@ const SETTINGS = {
     patternMessage: 'SWIFT code must be 8 or 11 letters / digits',
   },
 
+  // Verification: sellers whose KYC is not complete can only have this many listings live / in review
+  unverified_listing_limit: {
+    label: 'Listing Limit Until Verified',
+    description: 'Farmers, traders and logistics providers whose account or KYC documents are not fully approved can have at most this many listings live or waiting for review. 0 = none until verified.',
+    group: 'verification',
+    type: 'number',
+    default: 3,
+    min: 0,
+    max: 100,
+    decimals: 0,
+    unit: 'listings',
+  },
+
   // Reviews & Ratings: a review whose comment has one of these words waits for the admin (not published at once)
   review_blocked_words: {
     label: 'Blocked Words in Reviews',
@@ -239,6 +252,7 @@ const SETTING_GROUPS = {
   company: 'Company Details (Invoices)',
   bank: 'AFA Bank Account (Bank Transfer)',
   reviews: 'Reviews & Ratings',
+  verification: 'Seller Verification',
 };
 
 module.exports = { SETTINGS, SETTING_GROUPS };

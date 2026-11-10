@@ -53,6 +53,8 @@ module.exports = (sequelize, DataTypes) => {
       rejectionReason: { type: DataTypes.TEXT, allowNull: true },
       // Admin approval (latest status change)
       approvedAt: { type: DataTypes.DATE, allowNull: true },
+      // set when the account AND every KYC document are approved ("Verified" badge), see verification.service.js
+      kycVerifiedAt: { type: DataTypes.DATE, allowNull: true },
       // sellers: average of published reviews ("4.8 (42 reviews)")
       ratingAvg: { type: DataTypes.DECIMAL(3, 2), allowNull: true },
       ratingCount: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },

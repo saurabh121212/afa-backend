@@ -38,7 +38,8 @@ function sellerShape(userId, dir, sellerUser = null) {
     userType: dir.user_type,
     userTypeLabel: USER_TYPE_LABELS[dir.user_type],
     region: dir.region_id ? { id: dir.region_id, name: dir.region_name } : null,
-    verified: dir.status === USER_STATUS.APPROVED,
+    // "Verified" badge: account approved AND every KYC document approved (verification.service.js)
+    verified: dir.status === USER_STATUS.APPROVED && Boolean(dir.kyc_verified_at),
     ...(sellerUser
       ? { rating: { average: sellerUser.ratingAvg === null || sellerUser.ratingAvg === undefined ? null : Number(sellerUser.ratingAvg), count: Number(sellerUser.ratingCount || 0) } }
       : {}),

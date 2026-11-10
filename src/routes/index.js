@@ -32,6 +32,7 @@ router.use('/me/orders', require('./order.routes')); // buyer checkout + orders 
 router.use('/me/bookings', require('./booking.routes')); // buyer service bookings (before /me)
 router.use('/me/reviews', require('./review.routes')); // buyer reviews (before /me)
 router.use('/me/credit-score', require('./creditScore.routes')); // farmers, traders, logistics (before /me)
+router.use('/me/verification', require('./verification.routes')); // Verified badge, KYC progress, banner (before /me)
 router.use('/me/sales', require('./sales.routes')); // seller orders received + claims (before /me)
 router.use('/me/claims', require('./claim.routes')); // buyer claims: problems after delivery (before /me)
 router.use('/me/refunds', require('./refund.routes')); // buyer refunds + refund bank account (before /me)

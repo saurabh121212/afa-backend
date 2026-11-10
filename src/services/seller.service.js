@@ -55,7 +55,7 @@ async function publicDetails(user) {
 async function sellerCard(userId, { withDetails = false } = {}) {
   const user = await User.findOne({
     where: { id: userId, status: USER_STATUS.APPROVED },
-    attributes: ['id', 'userType', 'status', 'approvedAt', 'submittedAt', 'createdAt', 'ratingAvg', 'ratingCount'],
+    attributes: ['id', 'userType', 'status', 'approvedAt', 'submittedAt', 'createdAt', 'ratingAvg', 'ratingCount', 'kycVerifiedAt'],
   });
   if (!user || !SELLER_USER_TYPES.includes(user.userType)) throw notFound();
 
@@ -74,7 +74,8 @@ async function sellerCard(userId, { withDetails = false } = {}) {
     name: name || null,
     userType: user.userType,
     userTypeLabel: USER_TYPE_LABELS[user.userType],
-    verified: true, // only approved sellers have a public profile ("Verified Farmer")
+    // "Verified Farmer / Trader / Service Provider" badge: every KYC document approved too (verification.service.js)
+    verified: Boolean(user.kycVerifiedAt),
     region: dir.region_id ? { id: dir.region_id, name: dir.region_name } : null,
     memberSince: user.approvedAt || user.submittedAt || user.createdAt, // "Member since March 2025"
     activeListings,

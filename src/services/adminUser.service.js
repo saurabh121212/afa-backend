@@ -100,6 +100,7 @@ function toListItem(row) {
     statusLabel: USER_STATUS_LABELS[row.status],
     joinedAt: joined,
     submittedAt: row.submitted_at,
+    kycVerified: Boolean(row.kyc_verified_at), // account + every KYC document approved ("Verified" badge)
     trustScore: null, // the credit score (0-100) of farmers, traders and logistics providers: set by list()
   };
 }
@@ -215,6 +216,7 @@ async function getDetails(id) {
     notes,
     paymentMethods: paymentMethodService.isAllowed(user.userType) ? paymentMethods : null,
     // farmers, traders and logistics providers: { score, grade, gradeLabel, calculatedAt } (details: /admin/credit-scores/:id)
+    kycVerified: Boolean(user.kycVerifiedAt), // "Verified" badge (account + every KYC document approved)
     ...(await (async () => {
       const cs = await creditScore.summaryFor(user.id, user.userType);
       return { trustScore: cs ? cs.score : null, creditScore: cs };

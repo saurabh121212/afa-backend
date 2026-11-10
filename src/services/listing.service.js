@@ -25,6 +25,7 @@ const { Op } = require('sequelize');
 const config = require('../config');
 const models = require('../models');
 const notifications = require('./notification.service');
+const verification = require('./verification.service');
 const ApiError = require('../utils/ApiError');
 const { getPagination, paginationMeta } = require('../utils/pagination');
 const { detectKind, formatLabels, FILE_KINDS } = require('../utils/fileTypes');
@@ -494,7 +495,9 @@ async function listMine(user, query) {
     counts[g.status] = Number(g.total);
   });
 
-  return { items: rows.map(toSeller), counts, pagination: paginationMeta(pg, count) };
+  // { limited, maxListings, used, remaining }: show "2 of 3 listings used" until the seller is verified
+  const listingLimit = await verification.listingLimitFor(user);
+  return { items: rows.map(toSeller), counts, listingLimit, pagination: paginationMeta(pg, count) };
 }
 
 // ---------- GET /me/listings/:id ----------
@@ -516,6 +519,8 @@ async function sendForReview(user, listing, transaction) {
     const sub = listing.subCategoryId ? await Category.findByPk(listing.subCategoryId, { transaction }) : null;
     assertVatAllowed(user, category, sub);
   }
+  // Not fully verified yet: limited number of listings live / in review
+  await verification.assertListingSlot(user, listing, transaction);
   await listing.update(
     { status: S.PENDING, submittedAt: new Date(), statusReason: null },
     { transaction }
@@ -667,6 +672,7 @@ async function setVisibility(user, id, { visible }) {
         { code: 'INVALID_STATUS_CHANGE' }
       );
     }
+    if (visible) await verification.assertListingSlot(user, listing);
     await listing.update({ status: target });
   }
   return toSeller(await findOwn(user, id));
