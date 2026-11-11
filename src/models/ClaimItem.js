@@ -1,6 +1,6 @@
 // One claimed order item and how much of it (a copy of the price at ordering time).
 module.exports = (sequelize, DataTypes) => {
-  const money = { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 };
+  const money = () => ({ type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 });
   const ClaimItem = sequelize.define(
     'ClaimItem',
     {

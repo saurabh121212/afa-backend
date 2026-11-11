@@ -21,6 +21,7 @@ router.use('/reviews', require('./reviewReport.routes')); // report a review (lo
 router.use(require('./cms.routes')); // public CMS: GET /banners, GET /faqs, POST /faqs/:id/view
 router.use('/contact', require('./contact.routes')); // public Contact Us form
 router.use('/blogs', require('./blog.routes')); // public blog: published posts only
+router.use('/videos', require('./video.routes')); // public Video Gallery: active videos only
 router.use('/payments', require('./payment.routes')); // payment gateway callbacks (public)
 
 // ---- SHARED by all user types ----
@@ -61,6 +62,7 @@ router.use('/admin/listings', require('./adminListing.routes'));
 router.use('/admin/banners', require('./adminBanner.routes')); // CMS banners
 router.use('/admin/faqs', require('./adminFaq.routes')); // CMS FAQs + FAQ categories
 router.use('/admin/blogs', require('./adminBlog.routes')); // CMS Blog & Resources
+router.use('/admin/videos', require('./adminVideo.routes')); // CMS Video Gallery
 router.use('/admin/contact-messages', require('./adminContact.routes')); // Contact Us inbox
 router.use('/admin/vat-registrations', require('./adminVat.routes')); // sellers' VAT registration review
 router.use('/admin/orders', require('./adminOrder.routes')); // Orders & Transactions (+ cancellation requests)
