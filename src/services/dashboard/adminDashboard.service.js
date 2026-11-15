@@ -17,7 +17,7 @@ const { round2, num, money } = require('../orderShared');
 const { SELLER_ORDER_STATUS_LABELS, PAYMENT_METHODS } = require('../../config/orders');
 const { USER_TYPE_LABELS } = require('../../utils/constants');
 
-const { SellerOrder, Order, OrderItem, Refund, User, Listing, Payment, Claim, CancellationRequest, ContactMessage } = models;
+const { SellerOrder, Order, OrderItem, Refund, User, Listing, Payment, Claim, CancellationRequest, ContactMessage, Review } = models;
 
 const CACHE_MS = 5 * 60 * 1000;
 const cache = new Map(); // key -> { at, data }
@@ -28,9 +28,9 @@ async function load(p) {
   const [sos, orders, refunds, users] = await Promise.all([
     SellerOrder.findAll({
       where: { paidAt: since },
-      attributes: ['id', 'orderId', 'sellerId', 'status', 'total', 'refundedAmount', 'paidAt', 'confirmBy', 'confirmedAt', 'deliveredAt', 'cancelledAt', 'cancelledBy', 'claimStatus'],
+      attributes: ['id', 'orderId', 'sellerId', 'fulfilment', 'status', 'total', 'refundedAmount', 'paidAt', 'confirmBy', 'confirmedAt', 'deliveredAt', 'cancelledAt', 'cancelledBy', 'claimStatus'],
     }),
-    Order.findAll({ where: { paidAt: since }, attributes: ['id', 'userId', 'total', 'paymentMethod', 'paidAt'] }),
+    Order.findAll({ where: { paidAt: since }, attributes: ['id', 'userId', 'kind', 'total', 'paymentMethod', 'paidAt'] }),
     Refund.findAll({ where: { createdAt: since }, attributes: ['id', 'amount', 'status', 'createdAt'] }),
     User.findAll({ attributes: ['id', 'userType', 'status', 'createdAt', 'submittedAt', 'approvedAt', 'lastLoginAt'] }),
   ]);
@@ -40,7 +40,7 @@ async function load(p) {
 const sum = (list, f) => round2(list.reduce((s, x) => s + num(f(x)), 0));
 
 async function todo() {
-  const [registrations, listings, payments, vat, claims, cancelRequests, refunds, contact] = await Promise.all([
+  const [registrations, listings, payments, vat, claims, cancelRequests, refunds, contact, reviewsHeld, reviewsReported] = await Promise.all([
     User.count({ where: { status: 'pending_approval' } }),
     Listing.count({ where: { status: 'pending' } }),
     Payment.count({ where: { method: 'bank_transfer', status: 'under_review' } }),
@@ -49,8 +49,11 @@ async function todo() {
     CancellationRequest.count({ where: { status: 'escalated' } }),
     Refund.count({ where: { status: 'pending' } }),
     ContactMessage.count({ where: { status: 'new' } }),
+    // reviews to check: waiting for approval + published ones with open reports
+    Review ? Review.count({ where: { status: 'held' } }) : 0,
+    Review ? Review.count({ where: { status: 'published', openReports: { [Op.gt]: 0 } } }) : 0,
   ]);
-  return { registrations, listings, payments, vat, claims, cancelRequests, refunds, contactMessages: contact };
+  return { registrations, listings, payments, vat, claims, cancelRequests, refunds, contactMessages: contact, reviews: reviewsHeld + reviewsReported };
 }
 
 // Per seller: sales + performance in the period
@@ -134,6 +137,9 @@ async function build(p) {
   });
 
   const approved = users.filter((u) => u.status === 'approved');
+  // Service bookings (already included in sales and orders above)
+  const isBookingOrder = (o) => o.kind === 'booking';
+  const bookingSo = (list) => list.filter((so) => so.fulfilment === 'service');
   const cards = {
     sales: P.compare(cur.gross, prev.gross),
     netSales: P.compare(cur.net, prev.net),
@@ -145,6 +151,8 @@ async function build(p) {
     approvedUsers: { value: approved.length },
     activeSellers: P.compare(new Set(curSo.map((so) => so.sellerId)).size, new Set(prevSo.map((so) => so.sellerId)).size),
     moneyHeld: { value: money_.balanceHeld },
+    bookings: P.compare(curOrders.filter(isBookingOrder).length, prevOrders.filter(isBookingOrder).length),
+    bookingSales: P.compare(salesOf(bookingSo(curSo)).gross, salesOf(bookingSo(prevSo)).gross),
   };
 
   const byType = countBy(approved, (u) => u.userType);
@@ -158,7 +166,7 @@ async function build(p) {
 
   return {
     cards,
-    labels: Object.fromEntries(['sales', 'netSales', 'avgOrder', 'refunds', 'moneyHeld'].map((k) => [k, money(cards[k].value)])),
+    labels: Object.fromEntries(['sales', 'netSales', 'avgOrder', 'refunds', 'moneyHeld', 'bookingSales'].map((k) => [k, money(cards[k].value)])),
     todo: todos,
     charts: {
       sales: P.series(p, curSo.filter((so) => so.status !== 'cancelled'), (so) => so.paidAt, { sales: (so) => num(so.total), orders: () => 1 }),

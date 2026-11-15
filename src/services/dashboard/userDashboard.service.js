@@ -1,10 +1,11 @@
 // GET /me/dashboard  -> the logged-in user's dashboard, by user type:
-//   farmer, trader -> seller dashboard (sales, revenue, orders, stock, performance, enquiries)
-//   buyer          -> buyer dashboard (orders, payments, refunds, addresses, wishlist, messages)
-//   logistics      -> account + listings + SAMPLE bookings (isSample: true) until bookings are built
+//   farmer, trader -> seller dashboard (sales, revenue, orders, stock, performance, enquiries, rating, credit score)
+//   buyer          -> buyer dashboard (orders, bookings, payments, refunds, addresses, wishlist, messages)
+//   logistics      -> service provider dashboard (bookings, revenue, upcoming jobs, services, rating, credit score)
 //   financial_institution -> no dashboard (403)
 //
 // Always live (no cache). Every money figure has a ready "labels" text (E 1,234.50).
+// Bookings are seller orders with fulfilment "service" (see config/bookings.js).
 const { Op } = require('sequelize');
 const models = require('../../models');
 const ApiError = require('../../utils/ApiError');
@@ -12,16 +13,41 @@ const chat = require('./chatStats');
 const P = require('./periods');
 const { paidIn, salesOf, performance, countBy } = require('./metrics');
 const { round2, num, money } = require('../orderShared');
-const { ORDER_STATUS_LABELS, SELLER_ORDER_STATUS_LABELS } = require('../../config/orders');
+const { ORDER_STATUS_LABELS, SELLER_ORDER_STATUS_LABELS, ORDER_KINDS, statusLabelFor } = require('../../config/orders');
 const { LISTING_STATUS, LISTING_STATUS_LABELS } = require('../../config/listingOptions');
+const { todayYmd } = require('../../config/bookings');
 
-const { SellerOrder, Order, OrderItem, Listing, WishlistItem, Refund, Claim, Address, Notification, User, UserDocument } = models;
+const { SellerOrder, Order, OrderItem, Listing, WishlistItem, Refund, Claim, Address, Notification, User, UserDocument, Booking, CreditScore } = models;
 
 const moneyLabels = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, money(v && typeof v === 'object' ? v.value : v)]));
 const safe = (p, fallback = 0) => Promise.resolve(p).catch((err) => {
   console.error('Dashboard: chat count failed:', err.message);
   return fallback;
 });
+
+const SERVICE = 'service';
+const GRADE_LABELS = { excellent: 'Excellent', good: 'Good', fair: 'Fair', building: 'Building' };
+
+// "4.6 (12 reviews)" -> { value: 4.6, count: 12 }; value is null with no published reviews (all-time)
+const ratingCard = (u) => ({
+  value: u && u.ratingAvg !== null && u.ratingAvg !== undefined && Number(u.ratingCount) > 0 ? round2(u.ratingAvg) : null,
+  count: u ? Number(u.ratingCount || 0) : 0,
+});
+
+// Small credit score card (null until the first calculation; GET /me/credit-score calculates it)
+async function creditScoreSummary(userId) {
+  if (!CreditScore) return null;
+  const row = await CreditScore.findOne({ where: { userId }, attributes: ['score', 'grade', 'calculatedAt'] }).catch(() => null);
+  if (!row) return null;
+  return { score: Number(row.score), maxScore: 100, grade: row.grade, gradeLabel: GRADE_LABELS[row.grade] || row.grade, calculatedAt: row.calculatedAt };
+}
+
+// A rate card: { value, previous, change, trend }; value null = nothing to measure in the period
+function rateCard(cur, prev) {
+  if (cur === null) return { value: null, previous: prev, change: null, trend: 'flat' };
+  const c = P.compare(cur, prev === null ? 0 : prev);
+  return prev === null ? { ...c, previous: null, change: null } : c;
+}
 
 // ---------- low stock ----------
 // At or below 2x the minimum order, or 10 when the listing has no minimum. null quantity = not tracked.
@@ -35,13 +61,14 @@ function stockState(l) {
 
 // ======================= SELLER (farmer, trader) =======================
 async function seller(user, p) {
-  const [sos, listings, account] = await Promise.all([
+  const [sos, listings, account, creditScore] = await Promise.all([
     SellerOrder.findAll({
       where: { sellerId: user.id, paidAt: { [Op.ne]: null } },
       attributes: ['id', 'status', 'total', 'refundedAmount', 'paidAt', 'confirmBy', 'confirmedAt', 'deliveredAt', 'completedAt', 'cancelledAt', 'cancelledBy', 'claimStatus', 'payoutStatus', 'payoutAmount', 'openCancelRequestId'],
     }),
     Listing.findAll({ where: { userId: user.id }, attributes: ['id', 'name', 'status', 'quantity', 'quantityUnit', 'priceUnit', 'minOrderQuantity', 'vatHold'] }),
-    User.findByPk(user.id, { attributes: ['id', 'status', 'vatStatus'] }),
+    User.findByPk(user.id, { attributes: ['id', 'status', 'vatStatus', 'ratingAvg', 'ratingCount'] }),
+    creditScoreSummary(user.id),
   ]);
   const now = sos.length ? paidIn(sos, p.from, p.to) : [];
   const before = sos.length ? paidIn(sos, p.prevFrom, p.prevTo) : [];
@@ -89,6 +116,7 @@ async function seller(user, p) {
     refunds: P.compare(refundSum(p.from, p.to), refundSum(p.prevFrom, p.prevTo)),
     payoutReleased: P.compare(released(p.from, p.to), released(p.prevFrom, p.prevTo)),
     payoutHeld: { value: payoutHeld },
+    rating: ratingCard(account),
   };
 
   return {
@@ -96,6 +124,7 @@ async function seller(user, p) {
     account: { status: account ? account.status : null, vatStatus: account ? account.vatStatus : null },
     cards,
     labels: moneyLabels({ sales: cards.sales, netSales: cards.netSales, avgOrder: cards.avgOrder, refunds: cards.refunds, payoutReleased: cards.payoutReleased, payoutHeld: cards.payoutHeld }),
+    creditScore,
     attention: {
       toConfirm: sos.filter((so) => so.status === 'paid').length,
       lateToConfirm: sos.filter((so) => so.status === 'paid' && so.confirmBy && new Date(so.confirmBy) < new Date()).length,
@@ -134,7 +163,7 @@ async function seller(user, p) {
 async function buyer(user, p) {
   const nowDate = new Date();
   const [orders, refunds, claims, addresses, wishlist, notifications, messages] = await Promise.all([
-    Order.findAll({ where: { userId: user.id }, attributes: ['id', 'orderNumber', 'status', 'total', 'paymentMethod', 'paymentDeadline', 'paidAt', 'createdAt'], order: [['createdAt', 'DESC']] }),
+    Order.findAll({ where: { userId: user.id }, attributes: ['id', 'orderNumber', 'kind', 'status', 'total', 'paymentMethod', 'paymentDeadline', 'paidAt', 'createdAt'], order: [['createdAt', 'DESC']] }),
     Refund.findAll({ where: { buyerId: user.id }, attributes: ['id', 'amount', 'status', 'bankDetails', 'paidAt', 'createdAt'] }),
     Claim.count({ where: { buyerId: user.id, status: { [Op.in]: ['open', 'rejected', 'escalated', 'awaiting_return'] } } }),
     Address.count({ where: { userId: user.id } }),
@@ -143,9 +172,16 @@ async function buyer(user, p) {
     safe(chat.unreadMessages(user.id)),
   ]);
   const orderIds = orders.map((o) => o.id);
-  const toReceive = orderIds.length
-    ? await SellerOrder.findAll({ where: { orderId: orderIds, status: { [Op.in]: ['dispatched', 'ready_for_pickup'] } }, attributes: ['id', 'orderId', 'sellerOrderNumber', 'status'] })
-    : [];
+  const [toReceive, serviceDone] = orderIds.length
+    ? await Promise.all([
+      SellerOrder.findAll({ where: { orderId: orderIds, fulfilment: { [Op.ne]: SERVICE }, status: { [Op.in]: ['dispatched', 'ready_for_pickup'] } }, attributes: ['id', 'orderId', 'sellerOrderNumber', 'status', 'fulfilment'] }),
+      SellerOrder.findAll({
+        where: { orderId: orderIds, fulfilment: SERVICE, status: 'delivered' },
+        attributes: ['id', 'orderId', 'sellerOrderNumber', 'status', 'fulfilment', 'completeAfter', 'claimStatus'],
+        include: [{ model: Booking, as: 'booking', attributes: ['id', 'bookingNumber'] }],
+      }),
+    ])
+    : [[], []];
 
   const paid = (from, to) => orders.filter((o) => P.inRange(o.paidAt, from, to));
   const spent = (list) => round2(list.reduce((s, o) => s + num(o.total), 0));
@@ -153,6 +189,7 @@ async function buyer(user, p) {
   const pending = refunds.filter((r) => r.status !== 'paid');
   const cur = paid(p.from, p.to);
   const prev = paid(p.prevFrom, p.prevTo);
+  const kindOf = (o) => o.kind || 'product';
 
   const cards = {
     orders: P.compare(cur.length, prev.length),
@@ -169,6 +206,7 @@ async function buyer(user, p) {
       awaitingPayment: waiting.slice(0, 5).map((o) => ({
         id: o.id,
         orderNumber: o.orderNumber,
+        kind: kindOf(o),
         status: o.status,
         statusLabel: ORDER_STATUS_LABELS[o.status],
         total: num(o.total),
@@ -178,7 +216,20 @@ async function buyer(user, p) {
         secondsLeft: o.status === 'awaiting_payment' && o.paymentDeadline ? Math.max(0, Math.floor((new Date(o.paymentDeadline) - nowDate) / 1000)) : null,
       })),
       awaitingPaymentCount: waiting.length,
-      toConfirmReceived: toReceive.map((so) => ({ orderId: so.orderId, sellerOrderId: so.id, sellerOrderNumber: so.sellerOrderNumber, status: so.status, statusLabel: SELLER_ORDER_STATUS_LABELS[so.status] })),
+      toConfirmReceived: toReceive.map((so) => ({ orderId: so.orderId, sellerOrderId: so.id, sellerOrderNumber: so.sellerOrderNumber, status: so.status, statusLabel: statusLabelFor(so) })),
+      // bookings marked "Service Done": the buyer confirms or reports a problem (auto-completes at completeAfter)
+      toConfirmServiceDone: serviceDone
+        .filter((so) => (so.claimStatus || 'none') !== 'active')
+        .map((so) => ({
+          orderId: so.orderId,
+          sellerOrderId: so.id,
+          sellerOrderNumber: so.sellerOrderNumber,
+          bookingId: so.booking ? so.booking.id : null,
+          bookingNumber: so.booking ? so.booking.bookingNumber : null,
+          status: so.status,
+          statusLabel: statusLabelFor(so),
+          completeAfter: so.completeAfter,
+        })),
       refundsNeedBankDetails: pending.filter((r) => !r.bankDetails).length,
       openClaims: claims,
     },
@@ -186,56 +237,159 @@ async function buyer(user, p) {
       spending: P.series(p, cur, (o) => o.paidAt, { spent: (o) => num(o.total), orders: () => 1 }),
       ordersByStatus: Object.entries(countBy(orders.filter((o) => P.inRange(o.createdAt, p.from, p.to)), (o) => o.status)).map(([status, count]) => ({ status, label: ORDER_STATUS_LABELS[status] || status, count })),
     },
-    recentOrders: orders.slice(0, 5).map((o) => ({ id: o.id, orderNumber: o.orderNumber, status: o.status, statusLabel: ORDER_STATUS_LABELS[o.status], total: num(o.total), totalLabel: money(o.total), createdAt: o.createdAt })),
-    counts: { savedAddresses: addresses, wishlist, unreadNotifications: notifications, unreadMessages: messages, messagesConnected: chat.connected, totalOrders: orders.length },
+    recentOrders: orders.slice(0, 5).map((o) => ({
+      id: o.id,
+      orderNumber: o.orderNumber,
+      kind: kindOf(o),
+      kindLabel: ORDER_KINDS[kindOf(o)] || kindOf(o),
+      status: o.status,
+      statusLabel: ORDER_STATUS_LABELS[o.status],
+      total: num(o.total),
+      totalLabel: money(o.total),
+      createdAt: o.createdAt,
+    })),
+    counts: {
+      savedAddresses: addresses,
+      wishlist,
+      unreadNotifications: notifications,
+      unreadMessages: messages,
+      messagesConnected: chat.connected,
+      totalOrders: orders.filter((o) => kindOf(o) === 'product').length,
+      totalBookings: orders.filter((o) => kindOf(o) === 'booking').length,
+    },
   };
 }
 
-// ======================= LOGISTICS =======================
-// Stable pseudo-random numbers (same user + same day = same sample), clearly marked as sample data
-function sampleNumber(seed, min, max) {
-  let h = 2166136261;
-  for (const ch of String(seed)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
-  return min + (h % (max - min + 1));
-}
+// ======================= LOGISTICS (service provider) =======================
+const UNAVAILABLE = ['booked', 'maintenance']; // listing availability values that mean "not bookable right now"
+const UPCOMING_STATUSES = ['paid', 'confirmed', 'in_progress'];
 
 async function logistics(user, p) {
-  const [account, docs, listings, unread] = await Promise.all([
-    User.findByPk(user.id, { attributes: ['id', 'status', 'approvedAt'] }),
+  const [account, docs, listings, unread, creditScore, sos] = await Promise.all([
+    User.findByPk(user.id, { attributes: ['id', 'status', 'approvedAt', 'kycVerifiedAt', 'ratingAvg', 'ratingCount'] }),
     UserDocument.findAll({ where: { userId: user.id }, attributes: ['status'] }),
-    Listing.findAll({ where: { userId: user.id }, attributes: ['id', 'status'] }),
+    Listing.findAll({ where: { userId: user.id }, attributes: ['id', 'name', 'status', 'availability'] }),
     Notification.count({ where: { userId: user.id, readAt: null } }),
+    creditScoreSummary(user.id),
+    SellerOrder.findAll({
+      where: { sellerId: user.id, fulfilment: SERVICE, paidAt: { [Op.ne]: null } },
+      attributes: ['id', 'orderId', 'sellerOrderNumber', 'fulfilment', 'status', 'total', 'refundedAmount', 'paidAt', 'confirmBy', 'confirmedAt', 'startedAt', 'deliveredAt', 'completedAt', 'cancelledAt', 'cancelledBy', 'claimStatus', 'payoutStatus', 'payoutAmount', 'openCancelRequestId'],
+    }),
   ]);
+
+  const soIds = sos.map((so) => so.id);
+  const now = paidIn(sos, p.from, p.to);
+  const before = paidIn(sos, p.prevFrom, p.prevTo);
+  const cur = salesOf(now);
+  const prev = salesOf(before);
+  const liveNowIds = now.filter((so) => so.status !== 'cancelled').map((so) => so.id);
+
+  const [bookings, refunds, items] = await Promise.all([
+    soIds.length ? Booking.findAll({ where: { sellerOrderId: soIds }, attributes: ['id', 'bookingNumber', 'sellerOrderId', 'listingId', 'bookingType', 'startDate', 'endDate', 'startTime'] }) : [],
+    soIds.length ? Refund.findAll({ where: { sellerOrderId: soIds, createdAt: { [Op.gte]: p.prevFrom } }, attributes: ['amount', 'createdAt'] }) : [],
+    soIds.length ? OrderItem.findAll({ where: { sellerOrderId: soIds }, attributes: ['sellerOrderId', 'listingId', 'name', 'quantity', 'lineTotal'] }) : [],
+  ]);
+  const bookingOf = new Map(bookings.map((b) => [b.sellerOrderId, b]));
+  const itemOf = new Map(items.map((i) => [i.sellerOrderId, i]));
+
+  const refundSum = (from, to) => round2(refunds.filter((r) => P.inRange(r.createdAt, from, to)).reduce((s, r) => s + num(r.amount), 0));
+  const released = (from, to) =>
+    round2(sos.filter((so) => so.payoutStatus === 'released' && P.inRange(so.completedAt || so.cancelledAt, from, to)).reduce((s, so) => s + num(so.payoutAmount), 0));
+  const payoutHeld = round2(sos.filter((so) => so.payoutStatus === 'held').reduce((s, so) => s + num(so.payoutAmount), 0));
+  // completed / (completed + cancelled), of the bookings paid in the period; null when none has finished yet
+  const completion = (list) => {
+    const done = list.filter((so) => so.status === 'completed').length;
+    const cancelled = list.filter((so) => so.status === 'cancelled').length;
+    return done + cancelled ? Math.round((done / (done + cancelled)) * 1000) / 10 : null;
+  };
+
+  const cards = {
+    bookings: P.compare(cur.orders, prev.orders),
+    revenue: P.compare(cur.gross, prev.gross),
+    netRevenue: P.compare(cur.net, prev.net),
+    avgBooking: P.compare(cur.avgOrder, prev.avgOrder),
+    refunds: P.compare(refundSum(p.from, p.to), refundSum(p.prevFrom, p.prevTo)),
+    completionRate: rateCard(completion(now), completion(before)),
+    payoutReleased: P.compare(released(p.from, p.to), released(p.prevFrom, p.prevTo)),
+    payoutHeld: { value: payoutHeld },
+    avgRating: ratingCard(account),
+  };
+
+  // Upcoming jobs: not finished yet, by start date (jobs already in progress first)
+  const today = todayYmd();
+  const upcomingAll = sos
+    .filter((so) => UPCOMING_STATUSES.includes(so.status))
+    .map((so) => ({ so, b: bookingOf.get(so.id), i: itemOf.get(so.id) }))
+    .filter((x) => x.b && (x.so.status === 'in_progress' || String(x.b.endDate) >= today))
+    .sort((a, c) => (a.so.status === 'in_progress' ? 0 : 1) - (c.so.status === 'in_progress' ? 0 : 1) || String(a.b.startDate).localeCompare(String(c.b.startDate)) || a.so.id - c.so.id);
+  const upcoming = upcomingAll.slice(0, 5).map(({ so, b, i }) => ({
+    orderId: so.orderId,
+    sellerOrderId: so.id,
+    sellerOrderNumber: so.sellerOrderNumber,
+    bookingId: b.id,
+    bookingNumber: b.bookingNumber,
+    listingId: b.listingId,
+    service: i ? i.name : null,
+    bookingType: b.bookingType,
+    startDate: b.startDate,
+    endDate: b.endDate,
+    startTime: b.startTime || null,
+    status: so.status,
+    statusLabel: statusLabelFor(so),
+    total: num(so.total),
+    totalLabel: money(so.total),
+  }));
+
+  // Top services (by revenue of bookings paid in the period)
+  const top = new Map();
+  items
+    .filter((i) => liveNowIds.includes(i.sellerOrderId))
+    .forEach((i) => {
+      const t = top.get(i.listingId) || { listingId: i.listingId, name: i.name, bookings: 0, revenue: 0 };
+      t.bookings += 1;
+      t.revenue = round2(t.revenue + num(i.lineTotal));
+      top.set(i.listingId, t);
+    });
+  const topServices = [...top.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 5).map((t) => ({ ...t, revenueLabel: money(t.revenue) }));
+
   const byStatus = countBy(listings, (l) => l.status);
-  const sampleSeries = P.series(p, [], () => null, { bookings: () => 0, revenue: () => 0 }).map((b) => {
-    const bookings = sampleNumber(`${user.id}-${b.key}-b`, 0, p.bucket === 'day' ? 4 : p.bucket === 'week' ? 18 : 60);
-    return { ...b, bookings, revenue: bookings * sampleNumber(`${user.id}-${b.key}-r`, 350, 1200) };
-  });
-  const bookings = sampleSeries.reduce((s, b) => s + b.bookings, 0);
-  const revenue = sampleSeries.reduce((s, b) => s + b.revenue, 0);
+  const active = listings.filter((l) => l.status === LISTING_STATUS.ACTIVE);
+
   return {
     role: 'logistics',
     account: {
       status: account ? account.status : null,
       approvedAt: account ? account.approvedAt : null,
+      verified: Boolean(account && account.kycVerifiedAt),
       documents: countBy(docs, (d) => d.status),
     },
+    cards,
+    labels: moneyLabels({ revenue: cards.revenue, netRevenue: cards.netRevenue, avgBooking: cards.avgBooking, refunds: cards.refunds, payoutReleased: cards.payoutReleased, payoutHeld: cards.payoutHeld }),
+    creditScore,
+    attention: {
+      toConfirm: sos.filter((so) => so.status === 'paid').length,
+      lateToConfirm: sos.filter((so) => so.status === 'paid' && so.confirmBy && new Date(so.confirmBy) < new Date()).length,
+      startingToday: sos.filter((so) => so.status === 'confirmed' && bookingOf.get(so.id) && String(bookingOf.get(so.id).startDate) === today).length,
+      inProgress: sos.filter((so) => so.status === 'in_progress').length,
+      awaitingBuyerConfirmation: sos.filter((so) => so.status === 'delivered').length,
+      cancelRequests: sos.filter((so) => so.openCancelRequestId).length,
+      openClaims: sos.filter((so) => so.claimStatus === 'active').length,
+      listingsRejected: byStatus[LISTING_STATUS.REJECTED] || 0,
+      listingsPending: byStatus[LISTING_STATUS.PENDING] || 0,
+    },
+    upcoming,
+    charts: {
+      bookings: P.series(p, now.filter((so) => so.status !== 'cancelled'), (so) => so.paidAt, { bookings: () => 1, revenue: (so) => num(so.total) }),
+      bookingsByStatus: Object.entries(countBy(now, (so) => so.status)).map(([status, count]) => ({ status, label: statusLabelFor({ fulfilment: SERVICE, status }), count })),
+      topServices,
+    },
+    performance: performance(now),
     listings: {
       total: listings.length,
       byStatus: Object.entries(byStatus).map(([status, count]) => ({ status, label: LISTING_STATUS_LABELS[status] || status, count })),
+      notAvailableNow: active.filter((l) => UNAVAILABLE.includes(l.availability)).length,
     },
-    counts: { unreadNotifications: unread },
-    sample: {
-      isSample: true,
-      note: 'Sample data. Real figures appear here once service bookings (transport, warehousing, equipment leasing) are live.',
-      cards: {
-        bookings: { value: bookings },
-        revenue: { value: revenue, label: money(revenue) },
-        completionRate: { value: sampleNumber(`${user.id}-${p.key}-c`, 82, 98) },
-        avgRating: { value: sampleNumber(`${user.id}-${p.key}-a`, 38, 49) / 10 },
-      },
-      charts: { bookings: sampleSeries },
-    },
+    counts: { unreadNotifications: unread, totalBookings: sos.length },
   };
 }
 
