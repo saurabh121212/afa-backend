@@ -22,6 +22,7 @@ router.use(require('./cms.routes')); // public CMS: GET /banners, GET /faqs, POS
 router.use('/contact', require('./contact.routes')); // public Contact Us form
 router.use('/blogs', require('./blog.routes')); // public blog: published posts only
 router.use('/videos', require('./video.routes')); // public Video Gallery: active videos only
+router.use('/weather', require('./weather.routes')); // public weather per inkhundla (OpenWeather, stored by the weather job)
 router.use('/payments', require('./payment.routes')); // payment gateway callbacks (public)
 
 // ---- SHARED by all user types ----
@@ -43,6 +44,7 @@ router.use('/me/notifications', require('./notification.routes')); // the bell (
 router.use('/me/devices', require('./device.routes')); // push notification tokens (before /me)
 router.use('/me/dashboard', require('./dashboard.routes')); // my dashboard by user type (before /me)
 router.use('/me/conversations', require('./chat/conversation.routes')); // chat (your module, before /me)
+router.use('/me/weather', require('./myWeather.routes')); // weather of my area (before /me)
 router.use('/me', require('./me.routes')); // logged-in user's own account (profile, payments, KYC documents)
 
 // ---- ONE file per user type ----
@@ -77,5 +79,6 @@ router.use('/admin/notifications', require('./adminNotification.routes')); // ad
 router.use('/admin/broadcasts', require('./adminBroadcast.routes')); // advisories / announcements (in-app + push)
 router.use('/admin/dashboard', require('./adminDashboard.routes')); // marketplace overview, seller performance, reports
 router.use('/admin/settings', require('./adminSetting.routes')); // System Settings (VAT rate, payment time limit...)
+router.use('/admin/weather', require('./adminWeather.routes')); // weather: status, runs, coordinates, refresh
 
 module.exports = router;

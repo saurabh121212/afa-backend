@@ -108,6 +108,16 @@ const config = {
   },
   webAppUrl: (process.env.WEB_APP_URL || '').replace(/\/+$/, ''),
 
+  // Weather (OpenWeather, free plan). The job fetches data only when WEATHER_ENABLED=true AND a key is set.
+  //   OPENWEATHER_API_KEY  -> from https://home.openweathermap.org/api_keys (a new key can take up to 2 hours to work)
+  //   WEATHER_ENABLED      -> true | false (default false)
+  //   OPENWEATHER_BASE_URL -> leave empty (only for testing)
+  weather: {
+    enabled: (process.env.WEATHER_ENABLED || 'false').trim().toLowerCase() === 'true',
+    apiKey: (process.env.OPENWEATHER_API_KEY || '').trim(),
+    baseUrl: (process.env.OPENWEATHER_BASE_URL || 'https://api.openweathermap.org').trim().replace(/\/+$/, ''),
+  },
+
   corsOrigins: (process.env.CORS_ORIGINS || '')
     .split(',')
     .map((o) => o.trim())

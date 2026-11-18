@@ -7,6 +7,7 @@ const { connectDatabase } = require('./src/database/connection');
 const { verifyEmailConnection } = require('./src/services/email.service');
 const { attachSocketServer } = require('./src/socket');
 const orderJobs = require('./src/jobs/orderJobs');
+const weatherJobs = require('./src/jobs/weatherJobs');
 
 async function start() {
   try {
@@ -20,6 +21,8 @@ async function start() {
       );
       // Cancel unpaid orders / complete delivered ones every minute
       if (config.runJobs) orderJobs.start();
+      // Weather from OpenWeather: current hourly, forecast every 3 hours (only when switched on in .env)
+      if (config.runJobs) weatherJobs.start();
     });
   } catch (err) {
     console.error('❌ Could not start server:', err.message);
